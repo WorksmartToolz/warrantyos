@@ -40,6 +40,7 @@ export type Database = {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       users: {
         Row: {
@@ -69,6 +70,59 @@ export type Database = {
           created_at?: string
           updated_at?: string
         }
+        Relationships: [
+          {
+            foreignKeyName: 'users_tenant_id_fkey'
+            columns: ['tenant_id']
+            isOneToOne: false
+            referencedRelation: 'tenants'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      invitations: {
+        Row: {
+          id: string
+          tenant_id: string
+          email: string
+          role: 'admin' | 'reviewer' | 'viewer'
+          full_name: string | null
+          token: string
+          expires_at: string
+          consumed_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          tenant_id: string
+          email: string
+          role: 'admin' | 'reviewer' | 'viewer'
+          full_name?: string | null
+          token: string
+          expires_at: string
+          consumed_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          tenant_id?: string
+          email?: string
+          role?: 'admin' | 'reviewer' | 'viewer'
+          full_name?: string | null
+          token?: string
+          expires_at?: string
+          consumed_at?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'invitations_tenant_id_fkey'
+            columns: ['tenant_id']
+            isOneToOne: false
+            referencedRelation: 'tenants'
+            referencedColumns: ['id']
+          }
+        ]
       }
     }
     Views: {
@@ -94,6 +148,10 @@ export type TenantUpdate = Database['public']['Tables']['tenants']['Update']
 export type User = Database['public']['Tables']['users']['Row']
 export type UserInsert = Database['public']['Tables']['users']['Insert']
 export type UserUpdate = Database['public']['Tables']['users']['Update']
+
+export type Invitation = Database['public']['Tables']['invitations']['Row']
+export type InvitationInsert = Database['public']['Tables']['invitations']['Insert']
+export type InvitationUpdate = Database['public']['Tables']['invitations']['Update']
 
 export type UserRole = User['role']
 export type TenantStatus = Tenant['status']
