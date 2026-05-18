@@ -10,6 +10,7 @@
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at = now();
@@ -92,6 +93,11 @@ set search_path = public
 as $$
   select tenant_id from public.users where id = auth.uid()
 $$;
+
+-- anon has no business calling this function; authenticated must retain access
+-- because all RLS policies on tenants, users, and invitations invoke it.
+revoke execute on function public.get_user_tenant_id() from anon;
+grant  execute on function public.get_user_tenant_id() to authenticated;
 
 
 -- ────────────────────────────────────────────────────────────
