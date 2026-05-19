@@ -120,6 +120,31 @@ Triggered when decisions exceed reviewer authority. Two request modes: Standard 
 13. Notice of Closure
 14. Pathway B notices (right to dispute, final resolution)
 
+## Role Tier Model
+
+The platform uses four roles across two distinct tiers:
+
+**Platform Admin** — Provider-side. Full cross-tenant administrative authority. Manages tenant provisioning, platform admin accounts, and platform-level configuration. Stored as `is_platform_admin: true` in Supabase Auth user_metadata. No row in `public.users`. This role name is intentional and stable — it is not renamed to "Super Admin" or any other term.
+
+**Team Admin** — Organization-side. Tenant-scoped. Manages team membership (invitations, role changes, suspend, remove) and tenant settings within their own tenant only. No cross-tenant access. Stored as `role = 'team_admin'` in `public.users`.
+
+**Reviewer** — Operational user. Performs claim evaluation work within a tenant. Stored as `role = 'reviewer'` in `public.users`.
+
+**Viewer** — Read-only user within a tenant. Stored as `role = 'viewer'` in `public.users`.
+
+### Team Admin Seat Count
+
+Each tenant has a `max_team_admins` integer column (default 3) representing the contracted number of Team Admin seats. This value is set at provisioning time and is configurable per contract. Seat count enforcement (blocking role assignments that would exceed the limit) is implemented in Session 5b.
+
+### Session 5b Deferred Items
+
+The following tenant admin capabilities are deferred to Session 5b:
+- Invitation flow for adding team members from within the tenant app
+- Role management actions: promote, demote, suspend, remove
+- Tenant settings page
+- Team Admin seat count enforcement logic
+
+
 ## Technology Stack
 
 - Frontend: Next.js 14+ with App Router

@@ -13,6 +13,7 @@ export interface ProvisionTenantInput {
   tenantSlug: string
   adminEmail: string
   adminFullName: string
+  maxTeamAdmins?: number
 }
 
 export type ProvisionTenantResult =
@@ -38,6 +39,7 @@ export async function provisionTenant(
   input: ProvisionTenantInput
 ): Promise<ProvisionTenantResult> {
   const { tenantName, tenantSlug, adminEmail, adminFullName } = input
+  const maxTeamAdmins = input.maxTeamAdmins ?? 3
 
   // Validate inputs
   if (!tenantName.trim()) return { success: false, error: 'tenant_name is required' }
@@ -54,6 +56,9 @@ export async function provisionTenant(
     return { success: false, error: 'admin_email is not a valid email address' }
   }
   if (!adminFullName.trim()) return { success: false, error: 'admin_full_name is required' }
+  if (!Number.isInteger(maxTeamAdmins) || maxTeamAdmins < 1) {
+    return { success: false, error: 'max_team_admins must be a positive integer' }
+  }
 
   const admin = createAdminClient()
 
@@ -71,7 +76,7 @@ export async function provisionTenant(
   // Create the tenant
   const { data: tenant, error: tenantError } = await admin
     .from('tenants')
-    .insert({ name: tenantName.trim(), slug: tenantSlug })
+    .insert({ name: tenantName.trim(), slug: tenantSlug, max_team_admins: maxTeamAdmins })
     .select('id')
     .single()
 
@@ -89,7 +94,7 @@ export async function provisionTenant(
   const { error: inviteError } = await admin.from('invitations').insert({
     tenant_id: tenant.id,
     email: adminEmail.trim().toLowerCase(),
-    role: 'admin',
+    role: 'team_admin',
     full_name: adminFullName.trim(),
     token,
     expires_at: expiresAt,

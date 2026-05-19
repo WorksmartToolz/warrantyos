@@ -1,6 +1,8 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { LogoutButton } from '@/components/ui/logout-button'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 export default async function AppPage() {
   const supabase = await createClient()
@@ -11,44 +13,84 @@ export default async function AppPage() {
 
   if (!user) redirect('/login')
 
-  // Load the user's profile and tenant name
   const { data: profile } = await supabase
     .from('users')
     .select('full_name, tenant_id')
     .eq('id', user.id)
     .single()
 
-  const { data: tenant } = await supabase
-    .from('tenants')
-    .select('name')
-    .eq('id', profile?.tenant_id ?? '')
-    .single()
+  const [{ data: tenant }, { count: totalMembers }, { count: teamAdminCount }] =
+    await Promise.all([
+      supabase
+        .from('tenants')
+        .select('name, slug, max_team_admins')
+        .eq('id', profile?.tenant_id ?? '')
+        .single(),
+      supabase.from('users').select('*', { count: 'exact', head: true }),
+      supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('role', 'team_admin'),
+    ])
 
   const displayName = profile?.full_name ?? user.email
 
   return (
-    <main className="flex min-h-screen flex-col bg-neutral-50">
-      <header className="flex items-center justify-between border-b border-neutral-200 bg-white px-6 py-3">
-        <span className="text-sm font-medium">WarrantyOS</span>
-        <LogoutButton />
-      </header>
-
-      <div className="flex flex-1 items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Welcome, {displayName}
-          </h1>
-          {tenant?.name && (
-            <p className="mt-2 text-neutral-500">
-              You&apos;re logged into{' '}
-              <span className="font-medium text-neutral-700">{tenant.name}</span>
-            </p>
-          )}
-          <p className="mt-6 text-sm text-neutral-400">
-            Tenant workspace — coming in a future session
-          </p>
-        </div>
+    <div className="p-8">
+      <div className="mb-8">
+        <h1 className="text-xl font-semibold">Welcome, {displayName}</h1>
+        <p className="mt-1 text-sm text-neutral-500">{tenant?.name}</p>
       </div>
-    </main>
+
+      <div className="mb-8 grid grid-cols-3 gap-4">
+        <Card>
+          <CardHeader>
+            <CardDescription>Team Members</CardDescription>
+            <CardTitle className="text-3xl font-bold tabular-nums">
+              {totalMembers ?? 0}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Link
+              href="/app/team"
+              className="text-xs text-neutral-400 hover:text-neutral-600"
+            >
+              View team →
+            </Link>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardDescription>Team Admin Seats</CardDescription>
+            <CardTitle className="text-3xl font-bold tabular-nums">
+              {teamAdminCount ?? 0}
+              <span className="ml-1 text-lg font-normal text-neutral-400">
+                / {tenant?.max_team_admins ?? 3}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-neutral-400">of contracted seats used</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardDescription>Tenant Slug</CardDescription>
+            <CardTitle className="font-mono text-xl font-medium">
+              {tenant?.slug ?? '—'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-neutral-400">Your organization identifier</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Button render={<Link href="/app/team" />} size="sm">
+        Manage Team →
+      </Button>
+    </div>
   )
 }

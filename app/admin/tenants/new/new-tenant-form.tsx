@@ -32,6 +32,7 @@ export function NewTenantForm() {
         tenantSlug:    fd.get('tenantSlug')    as string ?? '',
         adminEmail:    fd.get('adminEmail')    as string ?? '',
         adminFullName: fd.get('adminFullName') as string ?? '',
+        maxTeamAdmins: Number(fd.get('maxTeamAdmins') ?? 3),
       })
       setResult(res)
     } catch {
@@ -116,6 +117,23 @@ export function NewTenantForm() {
         />
         <p className="text-xs text-neutral-400">
           Lowercase letters, numbers, and hyphens only.
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="maxTeamAdmins">Max Team Admins</Label>
+        <Input
+          id="maxTeamAdmins"
+          name="maxTeamAdmins"
+          type="number"
+          defaultValue="3"
+          min="1"
+          max="50"
+          required
+          disabled={isPending}
+        />
+        <p className="text-xs text-neutral-400">
+          Maximum number of Team Admin seats for this tenant. Set per contract; contact the account holder to adjust.
         </p>
       </div>
 

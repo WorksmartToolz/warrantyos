@@ -19,6 +19,7 @@ export type Database = {
           slug: string
           status: 'active' | 'suspended' | 'terminated'
           settings: Json
+          max_team_admins: number
           created_at: string
           updated_at: string
         }
@@ -28,6 +29,7 @@ export type Database = {
           slug: string
           status?: 'active' | 'suspended' | 'terminated'
           settings?: Json
+          max_team_admins?: number
           created_at?: string
           updated_at?: string
         }
@@ -37,6 +39,7 @@ export type Database = {
           slug?: string
           status?: 'active' | 'suspended' | 'terminated'
           settings?: Json
+          max_team_admins?: number
           created_at?: string
           updated_at?: string
         }
@@ -47,7 +50,7 @@ export type Database = {
           id: string
           tenant_id: string
           email: string
-          role: 'admin' | 'reviewer' | 'viewer'
+          role: 'team_admin' | 'reviewer' | 'viewer'
           full_name: string | null
           created_at: string
           updated_at: string
@@ -56,7 +59,7 @@ export type Database = {
           id: string
           tenant_id: string
           email: string
-          role: 'admin' | 'reviewer' | 'viewer'
+          role: 'team_admin' | 'reviewer' | 'viewer'
           full_name?: string | null
           created_at?: string
           updated_at?: string
@@ -65,7 +68,7 @@ export type Database = {
           id?: string
           tenant_id?: string
           email?: string
-          role?: 'admin' | 'reviewer' | 'viewer'
+          role?: 'team_admin' | 'reviewer' | 'viewer'
           full_name?: string | null
           created_at?: string
           updated_at?: string
@@ -85,7 +88,7 @@ export type Database = {
           id: string
           tenant_id: string
           email: string
-          role: 'admin' | 'reviewer' | 'viewer'
+          role: 'team_admin' | 'reviewer' | 'viewer'
           full_name: string | null
           token: string
           expires_at: string
@@ -96,7 +99,7 @@ export type Database = {
           id?: string
           tenant_id: string
           email: string
-          role: 'admin' | 'reviewer' | 'viewer'
+          role: 'team_admin' | 'reviewer' | 'viewer'
           full_name?: string | null
           token: string
           expires_at: string
@@ -107,7 +110,7 @@ export type Database = {
           id?: string
           tenant_id?: string
           email?: string
-          role?: 'admin' | 'reviewer' | 'viewer'
+          role?: 'team_admin' | 'reviewer' | 'viewer'
           full_name?: string | null
           token?: string
           expires_at?: string

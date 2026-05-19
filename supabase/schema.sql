@@ -30,15 +30,17 @@ create table public.tenants (
   id         uuid        primary key default gen_random_uuid(),
   name       text        not null,
   slug       text        not null unique,
-  status     text        not null default 'active'
-               check (status in ('active', 'suspended', 'terminated')),
-  settings   jsonb       not null default '{}',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  status          text        not null default 'active'
+                    check (status in ('active', 'suspended', 'terminated')),
+  settings        jsonb       not null default '{}',
+  max_team_admins integer     not null default 3,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
 );
 
-comment on column public.tenants.slug     is 'URL-safe identifier for the tenant, e.g. "acme-solar"';
-comment on column public.tenants.settings is 'Per-org configuration: WarrantyID format, ClaimID format, feature flags, etc.';
+comment on column public.tenants.slug            is 'URL-safe identifier for the tenant, e.g. "acme-solar"';
+comment on column public.tenants.settings        is 'Per-org configuration: WarrantyID format, ClaimID format, feature flags, etc.';
+comment on column public.tenants.max_team_admins is 'Contracted Team Admin seat count. Enforcement added in Session 5b.';
 
 create trigger tenants_set_updated_at
   before update on public.tenants
@@ -55,13 +57,13 @@ create table public.users (
   id          uuid        primary key references auth.users(id) on delete cascade,
   tenant_id   uuid        not null references public.tenants(id) on delete restrict,
   email       text        not null,
-  role        text        not null check (role in ('admin', 'reviewer', 'viewer')),
+  role        text        not null check (role in ('team_admin', 'reviewer', 'viewer')),
   full_name   text,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
 
-comment on column public.users.role is 'admin: tenant configuration; reviewer: claim evaluation; viewer: read-only';
+comment on column public.users.role is 'team_admin: tenant configuration and team management; reviewer: claim evaluation; viewer: read-only';
 
 create index users_tenant_id_idx on public.users(tenant_id);
 

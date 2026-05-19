@@ -5,9 +5,11 @@
 //     --name "Acme Solar" \
 //     --slug "acme-solar" \
 //     --email "admin@acmesolar.com" \
-//     --full-name "Jane Smith"
+//     --full-name "Jane Smith" \
+//     --max-team-admins 3
 //
-// If any argument is omitted you will be prompted for it.
+// If any required argument is omitted you will be prompted for it.
+// --max-team-admins is optional and defaults to 3 if not provided.
 
 import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
@@ -48,16 +50,25 @@ async function prompt(rl, question) {
 
 const rl = createInterface({ input, output })
 
-const tenantName   = getArg('--name')      ?? await prompt(rl, 'Tenant name:      ')
-const tenantSlug   = getArg('--slug')      ?? await prompt(rl, 'Tenant slug:      ')
-const adminEmail   = getArg('--email')     ?? await prompt(rl, 'Admin email:      ')
-const adminFullName= getArg('--full-name') ?? await prompt(rl, 'Admin full name:  ')
+const tenantName    = getArg('--name')             ?? await prompt(rl, 'Tenant name:      ')
+const tenantSlug    = getArg('--slug')             ?? await prompt(rl, 'Tenant slug:      ')
+const adminEmail    = getArg('--email')            ?? await prompt(rl, 'Admin email:      ')
+const adminFullName = getArg('--full-name')        ?? await prompt(rl, 'Admin full name:  ')
+const maxTeamAdminsRaw = getArg('--max-team-admins') ?? '3'
 
 rl.close()
 
+const maxTeamAdmins = Number(maxTeamAdminsRaw)
+
 console.log('\nProvisioning tenant…\n')
 
-const result = await provisionTenant({ tenantName, tenantSlug, adminEmail, adminFullName })
+const result = await provisionTenant({
+  tenantName,
+  tenantSlug,
+  adminEmail,
+  adminFullName,
+  maxTeamAdmins,
+})
 
 if (!result.success) {
   console.error(`Error: ${result.error}`)
@@ -65,8 +76,9 @@ if (!result.success) {
 }
 
 console.log('Tenant provisioned successfully.')
-console.log(`  Tenant ID:   ${result.tenantId}`)
-console.log(`  Tenant slug: ${result.tenantSlug}`)
+console.log(`  Tenant ID:        ${result.tenantId}`)
+console.log(`  Tenant slug:      ${result.tenantSlug}`)
+console.log(`  Max team admins:  ${maxTeamAdmins}`)
 console.log()
 console.log('Invitation URL (send this to the tenant admin):')
 console.log()

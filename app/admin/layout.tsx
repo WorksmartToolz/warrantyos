@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { LogoutButton } from '@/components/ui/logout-button'
-import { NavLink } from '@/components/admin/nav-link'
+import { NavLink } from '@/components/ui/nav-link'
 
 export default async function AdminLayout({
   children,
