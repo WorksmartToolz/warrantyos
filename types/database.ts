@@ -52,6 +52,8 @@ export type Database = {
           email: string
           role: 'team_admin' | 'reviewer' | 'viewer'
           full_name: string | null
+          status: 'active' | 'suspended'
+          removed_at: string | null
           created_at: string
           updated_at: string
         }
@@ -61,6 +63,8 @@ export type Database = {
           email: string
           role: 'team_admin' | 'reviewer' | 'viewer'
           full_name?: string | null
+          status?: 'active' | 'suspended'
+          removed_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -70,6 +74,8 @@ export type Database = {
           email?: string
           role?: 'team_admin' | 'reviewer' | 'viewer'
           full_name?: string | null
+          status?: 'active' | 'suspended'
+          removed_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -93,6 +99,7 @@ export type Database = {
           token: string
           expires_at: string
           consumed_at: string | null
+          invited_by: string | null
           created_at: string
         }
         Insert: {
@@ -104,6 +111,7 @@ export type Database = {
           token: string
           expires_at: string
           consumed_at?: string | null
+          invited_by?: string | null
           created_at?: string
         }
         Update: {
@@ -115,6 +123,7 @@ export type Database = {
           token?: string
           expires_at?: string
           consumed_at?: string | null
+          invited_by?: string | null
           created_at?: string
         }
         Relationships: [
@@ -157,4 +166,5 @@ export type InvitationInsert = Database['public']['Tables']['invitations']['Inse
 export type InvitationUpdate = Database['public']['Tables']['invitations']['Update']
 
 export type UserRole = User['role']
+export type UserStatus = User['status']
 export type TenantStatus = Tenant['status']

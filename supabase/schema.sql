@@ -40,7 +40,7 @@ create table public.tenants (
 
 comment on column public.tenants.slug            is 'URL-safe identifier for the tenant, e.g. "acme-solar"';
 comment on column public.tenants.settings        is 'Per-org configuration: WarrantyID format, ClaimID format, feature flags, etc.';
-comment on column public.tenants.max_team_admins is 'Contracted Team Admin seat count. Enforcement added in Session 5b.';
+comment on column public.tenants.max_team_admins is 'Contracted Team Admin seat count. Enforced at invite and role-promotion time.';
 
 create trigger tenants_set_updated_at
   before update on public.tenants
@@ -59,11 +59,16 @@ create table public.users (
   email       text        not null,
   role        text        not null check (role in ('team_admin', 'reviewer', 'viewer')),
   full_name   text,
+  status      text        not null default 'active'
+                check (status in ('active', 'suspended')),
+  removed_at  timestamptz,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
 
-comment on column public.users.role is 'team_admin: tenant configuration and team management; reviewer: claim evaluation; viewer: read-only';
+comment on column public.users.role       is 'team_admin: tenant configuration and team management; reviewer: claim evaluation; viewer: read-only';
+comment on column public.users.status     is 'active: normal access; suspended: temporarily blocked (reversible)';
+comment on column public.users.removed_at is 'Set when a team admin removes a user. Non-null means permanently blocked. Auth account is NOT deleted — historical attribution is preserved.';
 
 create index users_tenant_id_idx on public.users(tenant_id);
 
@@ -93,11 +98,17 @@ security definer
 stable
 set search_path = public
 as $$
-  select tenant_id from public.users where id = auth.uid()
+  select tenant_id
+  from public.users
+  where id = auth.uid()
+    and status = 'active'
+    and removed_at is null
 $$;
 
 -- anon has no business calling this function; authenticated must retain access
 -- because all RLS policies on tenants, users, and invitations invoke it.
+-- Suspended and removed users receive NULL from this function, which causes all
+-- tenant-scoped RLS policies to evaluate false for them (defense-in-depth).
 revoke execute on function public.get_user_tenant_id() from anon;
 grant  execute on function public.get_user_tenant_id() to authenticated;
 
@@ -126,6 +137,15 @@ create policy "users: members can view users in their tenant"
   for select
   using (tenant_id = public.get_user_tenant_id());
 
+-- A user may always read their own profile row.
+-- Required so that suspended/removed users can be identified by the middleware
+-- (get_user_tenant_id() returns NULL for them, which would otherwise block
+-- even a self-read). PostgreSQL ORs multiple SELECT policies together.
+create policy "users: authenticated can read their own profile"
+  on public.users
+  for select
+  using (id = auth.uid());
+
 -- A user may update only their own profile record.
 create policy "users: members can update their own profile"
   on public.users
@@ -135,6 +155,9 @@ create policy "users: members can update their own profile"
 
 -- INSERT / DELETE on users is service-role only.
 -- User provisioning and deprovisioning are admin server operations.
+-- Team management (role change, suspend, reactivate, remove) also uses
+-- service-role via Server Actions; permissions are enforced at the
+-- application layer in lib/core/manage-team-member.ts.
 
 
 -- ────────────────────────────────────────────────────────────
@@ -144,5 +167,41 @@ create policy "users: members can update their own profile"
 -- RLS policies control actual row access; these grants are the
 -- prerequisite for PostgREST to see the tables at all.
 -- ────────────────────────────────────────────────────────────
-grant all on public.tenants to anon, authenticated, service_role;
-grant all on public.users   to anon, authenticated, service_role;
+grant all on public.tenants      to anon, authenticated, service_role;
+grant all on public.users        to anon, authenticated, service_role;
+grant all on public.invitations  to anon, authenticated, service_role;
+
+
+-- ────────────────────────────────────────────────────────────
+-- invitations
+-- Holds pending invitations. The invited party visits
+-- /signup?token=<token> to complete account setup. The
+-- auth.users row is NOT created at provisioning time.
+-- ────────────────────────────────────────────────────────────
+create table public.invitations (
+  id          uuid        primary key default gen_random_uuid(),
+  tenant_id   uuid        not null references public.tenants(id) on delete cascade,
+  email       text        not null,
+  role        text        not null check (role in ('team_admin', 'reviewer', 'viewer')),
+  full_name   text,
+  token       text        not null unique,
+  expires_at  timestamptz not null,
+  consumed_at timestamptz,
+  invited_by  uuid        references auth.users(id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+
+comment on table  public.invitations             is 'Pending invitations. Token validated at signup; auth user created then, not at provisioning time.';
+comment on column public.invitations.token       is '64-char hex string (32 random bytes). Sent in the signup URL, never stored hashed.';
+comment on column public.invitations.consumed_at is 'Set when the invited user completes signup. Non-null means the token is spent.';
+comment on column public.invitations.invited_by  is 'User who created this invitation. NULL for platform-admin-issued invitations.';
+
+create index invitations_tenant_id_idx on public.invitations(tenant_id);
+create index invitations_token_idx     on public.invitations(token);
+
+alter table public.invitations enable row level security;
+
+create policy "invitations: members can view their tenant's invitations"
+  on public.invitations
+  for select
+  using (tenant_id = public.get_user_tenant_id());

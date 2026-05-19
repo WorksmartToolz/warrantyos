@@ -20,7 +20,7 @@ export default async function AppLayout({
 
   const { data: profile } = await supabase
     .from('users')
-    .select('full_name, tenant_id')
+    .select('full_name, tenant_id, role')
     .eq('id', user.id)
     .single()
 
@@ -31,6 +31,7 @@ export default async function AppLayout({
     .single()
 
   const displayName = profile?.full_name ?? user.email
+  const isAdmin = profile?.role === 'team_admin'
 
   return (
     <div className="flex min-h-screen bg-neutral-50">
@@ -45,6 +46,7 @@ export default async function AppLayout({
         <nav className="flex-1 space-y-0.5 p-3">
           <NavLink href="/app" exact>Dashboard</NavLink>
           <NavLink href="/app/team">Team</NavLink>
+          {isAdmin && <NavLink href="/app/settings">Settings</NavLink>}
         </nav>
 
         <div className="border-t border-neutral-200 p-3">

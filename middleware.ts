@@ -70,6 +70,24 @@ export async function middleware(request: NextRequest) {
     if (isPlatformAdmin) {
       return NextResponse.redirect(new URL('/admin', request.url))
     }
+
+    // Check that the tenant user's account is still active.
+    // The "users: authenticated can read their own profile" RLS policy allows
+    // this self-read even for suspended/removed users (whose get_user_tenant_id()
+    // returns NULL, which would otherwise block the query).
+    // TODO: move to JWT claim for production to avoid this per-request DB round-trip.
+    const { data: profile } = await supabase
+      .from('users')
+      .select('status, removed_at')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (!profile || profile.removed_at || profile.status !== 'active') {
+      const loginUrl = new URL('/login', request.url)
+      loginUrl.searchParams.set('error', 'account_inactive')
+      return NextResponse.redirect(loginUrl)
+    }
+
     return supabaseResponse
   }
 
