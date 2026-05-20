@@ -148,13 +148,31 @@ The following tenant admin capabilities are deferred to Session 5b:
 ## Technology Stack
 
 - Frontend: Next.js 14+ with App Router
-- Styling: Tailwind CSS with shadcn/ui components
+- Styling: Tailwind CSS v4 with shadcn/ui components
 - Database: PostgreSQL via Supabase with Row-Level Security
 - Authentication: Supabase Auth
 - File Storage: Supabase Storage
 - Email: Resend
 - Hosting: Vercel
 - Version Control: Git with GitHub
+
+### Frontend Dependencies
+
+**Tailwind CSS: v4 (required)**
+
+This project uses Tailwind v4. The shadcn component style (`base-nova`) generates components that use Tailwind v4-specific class syntax — including `data-open:`, `in-data-[...]`, `not-data-[...]`, `**:`, and CSS variable shorthand (`w-(--var)`) — none of which are valid in Tailwind v3. The project was migrated from v3 to v4 in Session 5c after Session 5b revealed that interactive components (Select, DropdownMenu) were broken due to this mismatch.
+
+**shadcn: `base-nova` style (Base UI primitives)**
+
+Components are installed via `shadcn@latest` and use the `base-nova` style, which wraps `@base-ui/react` primitives rather than the older `@radix-ui/react-*` packages. The `base-nova` style was introduced by shadcn in December 2025 alongside Tailwind v4 support; it is not compatible with Tailwind v3.
+
+**Adding new shadcn components**
+
+Run `npx shadcn@latest add <component-name>` from the project root. The CLI reads `components.json` (style: `base-nova`) and generates a Tailwind v4-compatible component. Do not pin to an older shadcn version — the current `shadcn@latest` is what generated the existing components and is the correct tool going forward.
+
+**Known deferred issue (Session 5d)**
+
+DropdownMenu items do not respond to clicks in the team management UI (`components/ui/team-member-actions.tsx`). This is a Base UI API issue unrelated to the Tailwind version. It was deferred from Session 5b/5c and is scheduled for Session 5d.
 
 ## Prototype Scope
 

@@ -20,7 +20,7 @@ See `docs/architecture-reference.md` for the platform's architectural specificat
 ## Tech Stack
 
 - **Frontend:** Next.js 14+ with App Router
-- **Styling:** Tailwind CSS with shadcn/ui components
+- **Styling:** Tailwind CSS v4 with shadcn/ui components (`base-nova` style, Base UI primitives)
 - **Database:** PostgreSQL via Supabase with Row-Level Security
 - **Authentication:** Supabase Auth
 - **File Storage:** Supabase Storage
