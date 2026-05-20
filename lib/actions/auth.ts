@@ -25,6 +25,20 @@ export async function login(
     return { error: error.message }
   }
 
+  // Check application-level account status before completing login.
+  // Both suspended and removed users fail this check — future work could
+  // differentiate the error message (suspended vs. removed) if needed.
+  const { data: profile } = await supabase
+    .from('users')
+    .select('status, removed_at')
+    .eq('id', data.user.id)
+    .maybeSingle()
+
+  if (!profile || profile.removed_at || profile.status !== 'active') {
+    await supabase.auth.signOut()
+    return { error: 'Your account has been suspended. Contact your administrator.' }
+  }
+
   const isPlatformAdmin = data.user?.user_metadata?.is_platform_admin === true
   redirect(isPlatformAdmin ? '/admin' : '/app')
 }

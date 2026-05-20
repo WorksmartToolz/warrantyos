@@ -154,6 +154,11 @@ function AlertDialogAction({
   )
 }
 
+// TODO: Button needs React.forwardRef to fully resolve Base UI ref warnings here.
+// DialogClose (nativeButton=true by default) passes a ref to Button via the render
+// prop, but Button doesn't forward it to ButtonPrimitive. nativeButton={false}
+// suppresses the nativeButton mismatch warning but not the React forwardRef warning.
+// Functional — defer to a future session.
 function AlertDialogCancel({
   className,
   variant = "outline",
@@ -164,6 +169,7 @@ function AlertDialogCancel({
   return (
     <AlertDialogPrimitive.Close
       data-slot="alert-dialog-cancel"
+      nativeButton={false}
       className={cn(className)}
       render={<Button variant={variant} size={size} />}
       {...props}

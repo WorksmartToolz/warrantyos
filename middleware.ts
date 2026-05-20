@@ -83,9 +83,18 @@ export async function middleware(request: NextRequest) {
       .maybeSingle()
 
     if (!profile || profile.removed_at || profile.status !== 'active') {
+      // Sign out before redirecting so the session cookie is cleared. Without this,
+      // the login page's authenticated-user guard redirects back to /app, creating
+      // an infinite loop. The Set-Cookie headers from signOut must be carried onto
+      // the redirect response explicitly — NextResponse.redirect() starts fresh.
+      await supabase.auth.signOut()
       const loginUrl = new URL('/login', request.url)
       loginUrl.searchParams.set('error', 'account_inactive')
-      return NextResponse.redirect(loginUrl)
+      const response = NextResponse.redirect(loginUrl)
+      supabaseResponse.headers.getSetCookie().forEach((cookie) => {
+        response.headers.append('set-cookie', cookie)
+      })
+      return response
     }
 
     return supabaseResponse

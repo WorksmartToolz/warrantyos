@@ -114,7 +114,7 @@ export function MemberActions({
                   <DropdownMenuItem
                     key={value}
                     disabled={disabled}
-                    onSelect={() => handleAction(() => changeRole(memberId, value))}
+                    onClick={() => handleAction(() => changeRole(memberId, value))}
                     className={isCurrent ? 'font-medium' : undefined}
                   >
                     {label}
@@ -133,7 +133,7 @@ export function MemberActions({
           {memberStatus === 'active' ? (
             <DropdownMenuItem
               disabled={cannotManageLastAdmin}
-              onSelect={() =>
+              onClick={() =>
                 setConfirm({
                   action: 'suspend',
                   label: 'Suspend user',
@@ -146,7 +146,7 @@ export function MemberActions({
               {cannotManageLastAdmin && <span className="ml-auto text-xs text-neutral-400">last admin</span>}
             </DropdownMenuItem>
           ) : (
-            <DropdownMenuItem onSelect={() => handleAction(() => reactivate(memberId))}>
+            <DropdownMenuItem onClick={() => handleAction(() => reactivate(memberId))}>
               Reactivate
             </DropdownMenuItem>
           )}
@@ -155,7 +155,7 @@ export function MemberActions({
           <DropdownMenuItem
             disabled={cannotManageLastAdmin}
             className="text-red-600 focus:text-red-600"
-            onSelect={() =>
+            onClick={() =>
               setConfirm({
                 action: 'remove',
                 label: 'Remove user',
@@ -249,13 +249,13 @@ export function InvitationActions({
         </DropdownMenuTrigger>
 
         <DropdownMenuContent align="end" className="w-40">
-          <DropdownMenuItem onSelect={copyLink}>
+          <DropdownMenuItem onClick={copyLink}>
             {copied ? 'Copied!' : 'Copy Link'}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-red-600 focus:text-red-600"
-            onSelect={() => setConfirm(true)}
+            onClick={() => setConfirm(true)}
           >
             Cancel Invite
           </DropdownMenuItem>

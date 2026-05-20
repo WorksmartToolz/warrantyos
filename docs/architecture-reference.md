@@ -170,9 +170,9 @@ Components are installed via `shadcn@latest` and use the `base-nova` style, whic
 
 Run `npx shadcn@latest add <component-name>` from the project root. The CLI reads `components.json` (style: `base-nova`) and generates a Tailwind v4-compatible component. Do not pin to an older shadcn version — the current `shadcn@latest` is what generated the existing components and is the correct tool going forward.
 
-**Known deferred issue (Session 5d)**
+**Known deferred issue**
 
-DropdownMenu items do not respond to clicks in the team management UI (`components/ui/team-member-actions.tsx`). This is a Base UI API issue unrelated to the Tailwind version. It was deferred from Session 5b/5c and is scheduled for Session 5d.
+`AlertDialogCancel` in `alert-dialog.tsx` uses `render={<Button />}` with Base UI's `DialogClose`. Two dev-mode console warnings appear because our `Button` component does not use `React.forwardRef` — Base UI passes a ref via the render prop that `Button` cannot forward to its underlying DOM element. Functional (dialog opens and buttons work); silenced partially with `nativeButton={false}`. Full fix requires adding `React.forwardRef` to `Button` in `components/ui/button.tsx`. Deferred.
 
 ## Prototype Scope
 
