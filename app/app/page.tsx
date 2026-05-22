@@ -26,11 +26,13 @@ export default async function AppPage() {
         .select('name, slug, max_team_admins')
         .eq('id', profile?.tenant_id ?? '')
         .single(),
-      supabase.from('users').select('*', { count: 'exact', head: true }),
+      supabase.from('users').select('*', { count: 'exact', head: true }).is('removed_at', null),
       supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
-        .eq('role', 'team_admin'),
+        .eq('role', 'team_admin')
+        .eq('status', 'active')
+        .is('removed_at', null),
     ])
 
   const displayName = profile?.full_name ?? user.email
