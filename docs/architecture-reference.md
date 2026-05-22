@@ -199,3 +199,51 @@ Out of Scope (defer to post-prototype):
 - Sophisticated reporting
 - Data migration tooling
 - Multi-tenant operations at scale
+
+### Session 5e Deferred Items
+
+The following items were identified during Session 5e tenant team
+management verification testing. None block Session 5f (claim intake
+foundation). They should be addressed in a dedicated UX/polish session
+before MVP completion.
+
+**Role change confirmation dialog (missing)**
+Suspend and Remove actions show a confirmation dialog before executing.
+Role changes via the Change Role submenu execute on click with no
+confirmation. Role changes are consequential (demoting a team_admin
+removes administrative access; demoting the last team_admin would
+lock the tenant out, though this is currently blocked by isLastTeamAdmin).
+Add a confirmation dialog matching the Suspend/Remove pattern, with body
+text explaining the role transition.
+
+**Tooltips on disabled actions (partial)**
+When an action is greyed out due to last-admin protection, the menu
+item displays an inline "last admin" label suffix. This is discoverable
+but minimal. Add hover tooltips for accessibility and consistency,
+explaining why the action is unavailable.
+
+**Login error message differentiation (suspended vs removed)**
+When a removed user attempts login, the error message reads "Your
+account has been suspended. Contact your administrator." This is
+inaccurate — the user is removed, not suspended. The two states are
+distinct: suspended is reversible via UI, removed is permanent.
+Differentiate the error messaging based on which state caused the
+login block.
+
+**Success toast missing on remove action**
+After successfully removing a team member, the team list updates but
+no success confirmation appears. Suspend and reactivate may have the
+same gap (not verified). Add success toast notifications for all
+mutations.
+
+**Remove confirmation dialog copy improvements**
+Current text: "Remove user / Remove will lose all access. Their
+historical data and audit records are preserved. This cannot be
+undone from the UI."
+Issues:
+- "Remove will lose all access" reads oddly with "Remove" as the
+  noun-subject. Change to "This user will lose all access" or
+  "The user will lose all access."
+- Confirm button is labeled generically "Confirm". Best practice for
+  destructive actions is to restate the action in the button:
+  "Remove" instead of "Confirm".
