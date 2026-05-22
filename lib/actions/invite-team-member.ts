@@ -1,5 +1,6 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import {
   inviteTeamMember as coreInviteTeamMember,
@@ -23,9 +24,14 @@ export async function inviteTeamMember(
   if (!profile) return { success: false, error: 'User profile not found' }
   if (profile.role !== 'team_admin') return { success: false, error: 'Only team admins can invite members' }
 
-  return coreInviteTeamMember({
+  const result = await coreInviteTeamMember({
     ...input,
     tenantId: profile.tenant_id,
     invitedBy: user.id,
   })
+  if (result.success) {
+    revalidatePath('/app/team')
+    revalidatePath('/app')
+  }
+  return result
 }

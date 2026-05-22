@@ -1,5 +1,6 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import {
   changeUserRole,
@@ -17,32 +18,47 @@ async function getCallerId(): Promise<string | null> {
   return user?.id ?? null
 }
 
+function revalidateTeamPages() {
+  revalidatePath('/app/team')
+  revalidatePath('/app')
+}
+
 export async function changeRole(userId: string, newRole: UserRole): Promise<ManageResult> {
   const callerId = await getCallerId()
   if (!callerId) return { success: false, error: 'Not authenticated' }
-  return changeUserRole(userId, newRole, callerId)
+  const result = await changeUserRole(userId, newRole, callerId)
+  if (result.success) revalidateTeamPages()
+  return result
 }
 
 export async function suspend(userId: string): Promise<ManageResult> {
   const callerId = await getCallerId()
   if (!callerId) return { success: false, error: 'Not authenticated' }
-  return suspendUser(userId, callerId)
+  const result = await suspendUser(userId, callerId)
+  if (result.success) revalidateTeamPages()
+  return result
 }
 
 export async function reactivate(userId: string): Promise<ManageResult> {
   const callerId = await getCallerId()
   if (!callerId) return { success: false, error: 'Not authenticated' }
-  return reactivateUser(userId, callerId)
+  const result = await reactivateUser(userId, callerId)
+  if (result.success) revalidateTeamPages()
+  return result
 }
 
 export async function remove(userId: string): Promise<ManageResult> {
   const callerId = await getCallerId()
   if (!callerId) return { success: false, error: 'Not authenticated' }
-  return removeUser(userId, callerId)
+  const result = await removeUser(userId, callerId)
+  if (result.success) revalidateTeamPages()
+  return result
 }
 
 export async function cancelInvite(invitationId: string): Promise<ManageResult> {
   const callerId = await getCallerId()
   if (!callerId) return { success: false, error: 'Not authenticated' }
-  return cancelInvitation(invitationId, callerId)
+  const result = await cancelInvitation(invitationId, callerId)
+  if (result.success) revalidateTeamPages()
+  return result
 }
