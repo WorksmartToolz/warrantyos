@@ -40,3 +40,7 @@ Thumbs.db
 # TypeScript build info
 *.tsbuildinfo
 next-env.d.ts
+
+# Supabase CLI
+supabase/.temp/
+supabase/.branches/
