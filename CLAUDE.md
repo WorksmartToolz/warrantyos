@@ -67,3 +67,17 @@ prerequisite is unmet, name the problem and stop. Do not propose
 alternative approaches that bypass the missing prerequisite. The
 user decides whether to install the prerequisite or to revisit the
 approach.
+
+**Hosted database migration hazard — STOP before any remote push.**
+The hosted/remote Supabase database's migration history is NOT
+baselined: it has no record of 000_baseline or migrations 001-004,
+because the initial tables were created manually in the SQL Editor
+before the migrations directory existed. Therefore: do NOT run
+`supabase db push`, `supabase db remote commit`, `supabase migration
+up --linked`, or any command that applies local migrations to the
+hosted/remote/production database — until the remote has been
+baselined via `supabase migration repair` (marking 000_baseline and
+001-004 as already-applied without running them). If asked to push
+migrations to the remote, STOP, state this hazard, and confirm the
+remote has been baselined first. This is expected to be handled in
+Phase 4. Surface it; do not work around it.
