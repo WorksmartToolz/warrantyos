@@ -1920,3 +1920,599 @@ Warranty Registration sections:
 - No claimant FK or snapshot. Whether the claimant is captured as a
   contact (FK + Snapshot single-FK shape, parallel to projects.customer_id)
   or differently is a Tier 3 decision.
+
+## Claim Intake Data Model
+
+**Status: Designed at the architectural level.** The hybrid hard-columns-plus-
+JSONB strategy is locked here; the hard column set and the Replacement Parts
+JSONB shape are settled; the JSONB shapes for the other six claim_types are
+deferred to downstream operational drafting when each type's workbook or SOP
+surfaces. Several specific architectural questions are flagged in the
+Outstanding architectural questions subsection below.
+
+This section is the operational data model on top of the Claim shell drafted
+in Tier 2. The shell established the entity, its FK to warranty_registrations,
+its ClaimID issuance, its status column at minimum scope, and its custom field
+support. This section adds the intake form's field schema — what gets captured
+when a customer files a claim through the tokenized intake link.
+
+A note on the workbook corpus. Audit Topic 9 framed "the six claim intake
+workbooks" as source material for this section. On reading them, only two are
+actually intake workbooks: Claim Intake Form Datapoint and Parts Claim
+Datapoints. The other four — Claim Denial Escalations Intake, Claim Denial
+Escalations Reviewer Data, Work Authorizations Customer Inputs, Work Plan Data
+Inputs — belong to downstream Tier 3 sections (Escalation Pathways for the
+first two, Work Plan Workflow for the latter two). The audit's "six workbooks"
+framing was inherited loosely; the actual intake corpus is two.
+
+### The hybrid strategy
+
+The intake schema uses three mechanisms, each addressing a different kind of
+variation:
+
+- Hard columns on the claims table for fields that are universal across all
+  claim types and all warrantors. Every claim has a claim_type, a date of
+  defect, a priority flag, a description.
+- JSONB on the claims table for fields whose schema varies by claim_type
+  across the platform. Every warrantor's Replacement Parts claim has a Part
+  Name; every Foundation claim has a Foundation Issue Type. The variation is
+  by claim_type, not by tenant — the platform architecture defines the shape.
+- Custom field values (per Decision 3, with entity_type = 'claim') for fields
+  whose presence and shape varies by tenant. Some warrantors need to capture
+  additional detail about LOTO responsibility beyond the categorical
+  loto_requirement value — who specifically performs LOTO, contact info for
+  the responsible party, authorization details. These vary by warrantor
+  business model and are not pre-defined by the platform. A warrantor whose
+  business model doesn't include electrical work may need no LOTO custom
+  fields at all. A warrantor who sometimes self-performs may define multiple.
+  The variation is by tenant — the tenant's Team Admin defines whatever
+  fields fit their operational language.
+
+The boundary between the second and third mechanisms is worth stating
+explicitly, because they overlap conceptually. The contrast is between
+platform-shaped variation and tenant-shaped variation. Part Name on a
+Replacement Parts claim is platform-shaped: every warrantor's Parts claim
+captures it, the field is part of how the platform models a Parts claim, no
+tenant configuration is involved, the field name is fixed. LOTO-responsibility
+detail beyond the universal loto_requirement is tenant-shaped: whether any
+such fields appear, what they are called, and what their options are all
+vary by tenant. Same general subject area (LOTO); different mechanism,
+because the variation is at a different level. That even the field *names*
+are tenant-configured is the strongest signal: a platform-architecture field
+has a fixed name; a tenant-configured field is named in the tenant's
+operational language.
+
+### Hard columns
+
+These are the universal fields. Every claim has them regardless of claim_type
+or tenant.
+
+    claims (hard columns added to the Tier 2 shell)
+      -- shell columns from Tier 2 (id, tenant_id,
+      --   warranty_registration_id, claim_id, status,
+      --   created_at, updated_at) are still present
+      claim_type                    text NOT NULL
+                                    -- 'billable_service_request' |
+                                    --   'design' | 'equipment' |
+                                    --   'foundation' | 'replacement_parts' |
+                                    --   'tracker' | 'workmanship'
+                                    -- CHECK constraint enforces allowed values
+      date_of_defect_incident       date NOT NULL
+      priority_emergency            boolean NOT NULL DEFAULT false
+      emergency_details             jsonb nullable
+                                    -- rich text, ProseMirror-compatible JSON;
+                                    -- present only when priority_emergency
+                                    -- is true
+      equipment_status              text NOT NULL
+                                    -- 'online' | 'offline'
+      offline_condition_explanation jsonb nullable
+                                    -- rich text, ProseMirror-compatible JSON;
+                                    -- present only when equipment_status
+                                    -- is 'offline'
+      loto_requirement              text NOT NULL
+                                    -- 'not_required' |
+                                    --   'required_claimant_responsible' |
+                                    --   'required_warrantor_responsible'
+                                    -- CHECK constraint enforces allowed values.
+                                    -- The workbook (supply-only) listed two
+                                    -- values; the platform-general schema
+                                    -- extends to three to cover warrantors
+                                    -- who self-perform LOTO.
+      required_docs_provided        boolean NOT NULL DEFAULT false
+      supporting_documents          jsonb nullable
+                                    -- the multi-select of document
+                                    -- categories the claimant declares they
+                                    -- are providing; shape flagged below
+      detailed_description          jsonb NOT NULL
+                                    -- rich text, ProseMirror-compatible JSON
+      submitter_name                text NOT NULL
+      submitter_email               text NOT NULL
+      ship_to_street                text
+      ship_to_city                  text
+      ship_to_state                 text
+      ship_to_zip                   text
+      recipient_name                text
+      recipient_phone               text
+      claim_type_data               jsonb nullable
+                                    -- per-claim_type structured fields;
+                                    -- shape varies by claim_type, defined
+                                    -- below
+
+The seven claim_type values come from Workbook 1's dropdown directly. The
+enum is extensible — adding a new claim_type is a migration that updates the
+CHECK constraint, the claim_type_data JSONB schema for the new type, and any
+UI affordances for it.
+
+The loto_requirement enum's three values cover the three real business
+shapes. Warrantors who do no electrical work and never self-perform LOTO see
+only the first two values in their operational flow (the warrantor-
+responsible value never applies). Warrantors who sometimes self-perform
+LOTO for electrical work in their scope may see any of the three. The
+industry-default case for system-owner-installed projects is
+required_claimant_responsible.
+
+### Rich text fields use Decision 4's ProseMirror storage
+
+Three columns store rich text: detailed_description, emergency_details, and
+offline_condition_explanation. All three use the same ProseMirror-compatible
+JSON storage format as Decision 4's rich-text custom field values, so the
+platform has one rich-text storage convention rather than two. The character
+cap defaults from Decision 4 apply (10,000 characters of effective text by
+default, per-tenant configurable downward via
+tenants.settings.rich_text_max_chars, hard platform ceiling 50,000). See the
+Custom Field System section's Rich Text Storage subsection for the format
+details.
+
+### claim_type_data JSONB by claim_type
+
+The claim_type_data column holds claim-type-specific structured fields. Its
+schema varies by claim_type. JSONB is the locked shape here (not flagged as
+a possible-child-table alternative the way supporting_documents is), because
+variable-schema-by-discriminator data is the case JSONB is genuinely designed
+for: the schema differs by claim_type, the fields don't decompose into
+uniform child rows the way a list of attachments does, and a polymorphic
+child table per claim_type would multiply the schema rather than encapsulate
+the variation. JSONB is the only sensible shape.
+
+The Replacement Parts shape is settled from Workbook 2:
+
+    -- claim_type = 'replacement_parts'
+    claim_type_data = {
+      "part_name":                   text,
+      "row_number":                  text,
+      "row_controller_asset_id":     text,
+      "description_of_issue":        text,
+      "customer_comments":           prosemirror-json   -- rich text
+    }
+
+Workbook 2 also lists Customer/Job Name/Ship To/Recipient on the Parts intake
+form, but those are either auto-populated from the parent registration
+(Customer, Job Name) or already in the hard columns above (Ship To,
+Recipient) — they do not appear in claim_type_data.
+
+The JSONB shapes for the other six claim_types — billable_service_request,
+design, equipment, foundation, tracker, workmanship — are not yet settled at
+the architectural layer. Each will be defined when its specific operational
+requirements surface (a per-type workbook, an SOP carving out the type's
+fields, or production usage). The Foundation Issue Type sub-dropdown from
+Workbook 1 is one piece of the foundation shape, but the values themselves
+are operational content not yet enumerated. This is the same restraint
+pattern as Section 7's specific conditions and document categorization in
+Warranty Registration: the architecture commits to the mechanism
+(claim_type_data JSONB), the per-type contents are downstream operational
+work.
+
+Validation of claim_type_data against the expected shape for the row's
+claim_type happens application-layer at write time, in the Server Action
+that creates or updates the claim. The database does not enforce
+per-claim_type JSONB shape — that's the same convention used for
+clock_events payload validation.
+
+### Auto-populated context from the parent registration
+
+Workbook 1 lists five fields as "auto-populated from parent WarrantyID, not
+visible in the intake form, only visible in the claim database and PDF
+generations": WarrantyID, Claim ID, Customer, Project name, Service Address.
+None of these become claim columns. The architecture handles each through
+existing relationships:
+
+- WarrantyID is reachable through the warranty_registration_id FK to
+  warranty_registrations.warranty_id.
+- Claim ID is the claim_id hard column (already in the Tier 2 shell,
+  generated at insert time).
+- Customer is reachable through warranty_registrations.project_id ->
+  projects.customer_id and the customer snapshots on projects.
+- Project name is on projects via the same path.
+- Service Address is the project's site_address_street/city/state/zip on
+  projects.
+
+Duplicating these on the claim would create sync surfaces where none is
+needed; reading them is a join, not a column.
+
+### Auto-populated does not mean immutable
+
+A note for downstream drafting: "auto-populated" in the workbook's framing
+means "filled in by the system, not by the customer at intake." It does not
+imply the value is frozen at intake. The relationships through
+warranty_registrations and projects reflect the current state of those
+parent records. If a tenant edits the project's customer information,
+claims under that project show the updated information when read. The FK +
+Snapshot Pattern applies on projects.customer_id (the project's snapshot of
+the customer at project-creation time is frozen); whether claim-time
+snapshots of registration or project state are needed is a Phase 4 /
+downstream question, not raised by any locked source.
+
+### Custom field values for tenant-configurable intake fields
+
+Per Decision 3, claim is one of three Phase 1 entities that support custom
+fields. Tenant Team Admins define custom_field_definitions with
+entity_type = 'claim'; values fill in via custom_field_values with the
+claim_id FK set.
+
+The LOTO example illustrates how this works in practice across different
+business models. The hard-column loto_requirement captures the categorical
+answer every claim has — is LOTO required, and if so who is structurally
+responsible. Some warrantors need to capture additional detail about LOTO
+responsibility beyond that categorical value — who specifically performs
+LOTO, contact info for the responsible party, authorization details. These
+vary by warrantor business model and are not pre-defined by the platform.
+A warrantor whose business model doesn't include electrical work may need
+no LOTO custom fields at all (the categorical loto_requirement field
+captures everything relevant). A warrantor who sometimes self-performs may
+define multiple custom fields capturing the operational detail they track.
+The Custom Field System's 11 Phase 1 field types support whatever shape
+fits each tenant's operational language.
+
+The platform makes no architectural distinction between custom fields that
+appear on the intake form and custom fields that appear on the claim
+elsewhere in its lifecycle — both go through the same custom_field_values
+mechanism. Whether a definition surfaces at intake versus during review is
+an operational UI question, not a schema-level one.
+
+### Stateless tokenized intake link
+
+Claim intake uses the Stateless Tokenized Interaction Pattern. A customer
+receives a tokenized email link to a focused intake form; no account, no
+session persistence beyond the link. The token storage follows the pattern's
+"shape to copy, not shared store" rule: the intake token lives on its own
+record (or on the claim record itself, as an implementation detail to be
+settled), not in the invitations table. The invitations precedent gives the
+shape — a 64-character hex token, an expires_at timestamp, a consumed_at
+timestamp — and Audit Topic 9 calls out specifically that the intake token
+is "similar to invitation token but customer-facing" — same shape, separate
+storage.
+
+Whether the intake token is one column on the claim row or a separate
+claim_intake_tokens table is a Phase 3 implementation detail, parallel to
+the other implementation flags in this section. The architectural commitment
+is that the pattern applies and the token has its own storage.
+
+### Outstanding architectural questions
+
+The workbooks surfaced architectural questions that this section does not
+fully resolve. Each is flagged with the proposed resolution direction and
+what's still open:
+
+- Supporting documents shape. The supporting_documents column is JSONB
+  above, but the architecturally cleaner answer may be a child table
+  (claim_attachments) where each row is one document with its category.
+  Phase 3 implementation detail; the choice between JSONB array and child
+  table is settled at migration time. The user-facing semantics (multi-
+  select of document categories the claimant declares they are providing)
+  is locked either way. Unlike claim_type_data, this is genuinely a JSONB-
+  vs-child-table choice — the data is a list of uniform items, exactly the
+  case child tables handle well.
+- O&M Provider as a contact. The intake form captures O&M Provider Company
+  Name, Contact Name, Email, and Phone — the exact shape of a Unified
+  Contacts Directory contact. The architecturally consistent answer is the
+  FK + Snapshot Pattern's single-FK shape: an om_provider_contact_id FK to
+  contacts with name/email/phone snapshots captured at intake. The
+  contact_type for the FK is the open question — Item 16's eight Phase 1
+  values include subcontractor_contact, which could fit, but a dedicated
+  om_provider value may be cleaner. Resolving the contact_type is a
+  downstream decision.
+- Ship-to address structure. The hard columns above use four scalars
+  (street/city/state/zip) following the project's site_address pattern for
+  consistency. Whether this is the right level of structure or whether the
+  project's address pattern itself needs revision (geocoding, international
+  formats) is a future decision, not raised by any locked source.
+- Claimant identity (the submitter). The Tier 2 shell flagged this; the
+  workbook gives narrow data (name + email only). The hard columns above
+  capture submitter_name and submitter_email directly, treating the
+  submitter as a free-text capture per claim rather than a contact
+  reference. The proposal is to keep it that way: a submitter is sometimes
+  a customer contact and sometimes a one-off third party, FK + Snapshot
+  may be too heavy for the operational shape, and free-text snapshots may
+  be enough. If reporting or reuse needs surface that argue for FK +
+  Snapshot, this is revisitable.
+- Foundation Issue Type sub-dropdown values. Workbook 1 lists the field
+  but not its values. The values themselves are operational content (which
+  Foundation issues a warrantor distinguishes), not architecture. Flagged
+  for downstream drafting when Foundation claim_type_data is settled.
+- claim_type_data JSONB shapes for the six non-Parts claim types. Flagged
+  above; each settles when its specific operational requirements surface.
+
+### What is NOT in the intake data model
+
+Parallel to the deliberate-omissions lists in Tier 2:
+
+- Escalation fields. Workbooks 3 and 4 (Claim Denial Escalations Intake,
+  Claim Denial Escalations Reviewer Data) are escalation entities, not
+  intake. They belong to the Tier 3 Escalation Pathways section.
+- Work plan and work authorization fields. Workbooks 5 and 6 are downstream
+  of claim intake and belong to the Tier 3 Work Plan Workflow section.
+- Review and gate state. v1's Six Gates are the operational structure of
+  claim review; the values in the status column come from that structure
+  but are settled when the Tier 3 claim lifecycle section is drafted.
+- Outcomes, costs, ALA documents. Each is its own Tier 3 section, claim is
+  the parent.
+
+## ALA System
+
+**Status: Designed at the architectural level.** ALA markup default and
+storage locked by Decision 7. ala_templates and ala_documents schemas
+follow Audit Topic 10's shape with the operational behavior the SOPs
+specify. Signature capture mechanism is flagged as an open architectural
+question — no locked source resolves it, and the choice has legal
+implications.
+
+ALA stands for the Owner's Consent and Assumption of Liability Agreement.
+It is the document a claimant signs when a claim's causation or ownership
+is unclear, accepting financial responsibility for the investigation if
+the defect is ultimately found to be outside warranty scope. The agreement
+exists because some claims need specialized investigation before a
+warranty determination can be made, and the warrantor cannot reasonably
+bear those investigation costs for non-warranty conditions on the
+claimant's site. The SOPs name this the "Indistinct Claims" workflow.
+v1's Six Final Outcomes lists "Indistinct Claim — ALA Required" as one of
+the six possible review outcomes.
+
+This section documents the data model and the operational behavior. It
+does not specify the legal form of the agreement itself — that content is
+warrantor-specific and is captured in tenant-defined templates.
+
+### Two tables: templates and documents
+
+The architecture is two tables in a parent-child relationship. A template
+is tenant-defined and reusable; a document is per-claim and one-shot.
+
+ala_templates holds tenant-defined template definitions — the agreement's
+general shape, content, and terms as a particular warrantor configures it.
+A tenant has one or more templates. Phase 1 likely has one default
+template per tenant; multiple templates support warrantors who use
+different agreement variants for different claim types or jurisdictions.
+
+ala_documents holds per-claim instantiations — for one specific claim, the
+specific agreement the claimant signs (or has been asked to sign), with
+that claim's amounts and terms filled in, with the signer's identity
+captured, with the signed-at timestamp recorded. An ALA document exists
+only when a claim's outcome is Indistinct; most claims never have one.
+
+Warrantors typically have their own internal document numbering for legal
+forms like this — a tenant's template would carry whatever document
+number identifier their compliance or legal practice uses. The platform
+stores the template content and any tenant-supplied identifier; the
+platform doesn't reserve or assign document numbers itself. Numbering is
+data, not architecture.
+
+### ala_templates schema
+
+    ala_templates
+      id              uuid PK
+      tenant_id       uuid NOT NULL FK -> tenants
+      name            text NOT NULL
+      content         jsonb NOT NULL
+                      -- the template's body, ProseMirror-compatible JSON
+                      -- per Decision 4; supports the same rich-text
+                      -- format as detailed_description on claims and
+                      -- rich-text custom fields
+      is_default      boolean NOT NULL DEFAULT false
+                      -- whether this is the tenant's default template;
+                      -- at most one default per tenant
+      deleted_at      timestamptz nullable
+                      -- soft-delete; retired templates remain queryable
+                      -- because documents generated from them must
+                      -- still be readable
+      created_at      timestamptz NOT NULL DEFAULT now()
+      updated_at      timestamptz NOT NULL DEFAULT now()
+
+The table follows the Standard RLS Pattern's six steps. tenant_id FK,
+RLS-enabled, standard SELECT policy, service-role-only writes, grants.
+
+Content is rich text in ProseMirror-compatible JSON — the same convention
+as detailed_description on claims and rich-text custom field values. A
+tenant defines the template through a rich-text editor; the stored JSON
+outlives any specific editor library. See Decision 4's Rich Text Storage
+for the format details.
+
+Soft-delete on templates (deleted_at) is required, not optional. A template
+retired today may have generated a document last year, and that document
+must remain readable for audit defensibility over the warranty horizon.
+Hard-deleting a template would break the historical record. The convention
+matches the Custom Field System's soft-delete pattern.
+
+The is_default boolean identifies the tenant's primary template. At most
+one is_default = true per tenant is the architectural intent; whether
+this is enforced by a partial UNIQUE index or by an application-layer
+invariant is a Phase 3 implementation detail.
+
+### ala_documents schema
+
+    ala_documents
+      id                          uuid PK
+      tenant_id                   uuid NOT NULL FK -> tenants
+                                  -- denormalized per Standard RLS Pattern
+      claim_id                    uuid NOT NULL UNIQUE FK -> claims
+                                  -- UNIQUE enforces 1:1; ON DELETE
+                                  -- behavior is a Phase 3 implementation
+                                  -- detail parallel to other claim-child
+                                  -- FK flags
+      template_id                 uuid NOT NULL FK -> ala_templates
+                                  -- which template this document was
+                                  -- generated from; template may be
+                                  -- soft-deleted later but the FK
+                                  -- remains valid because of soft-delete
+      content_snapshot            jsonb NOT NULL
+                                  -- the template content captured at
+                                  -- document generation time, frozen;
+                                  -- changes to the template later do
+                                  -- not affect already-generated
+                                  -- documents
+      markup_percent_snapshot     numeric(4,3) NOT NULL
+                                  -- the tenant's ala_markup_percent value
+                                  -- captured at document generation time;
+                                  -- frozen
+      signer_name                 text nullable
+      signer_email                text nullable
+      signed_at                   timestamptz nullable
+                                  -- null until the document is signed;
+                                  -- non-null is the architectural marker
+                                  -- of "ALA in place"
+      created_at                  timestamptz NOT NULL DEFAULT now()
+      updated_at                  timestamptz NOT NULL DEFAULT now()
+      -- CHECK / app-layer invariant: tenant_id matches the referenced
+      -- claim's tenant_id
+
+The table follows the Standard RLS Pattern. tenant_id is denormalized
+directly per the convention.
+
+UNIQUE on claim_id enforces that a claim has at most one ALA document. A
+claim either is Indistinct and has one ALA, or is not Indistinct and has
+none.
+
+content_snapshot is captured at document generation, not referenced live
+through template_id. This is the same defensibility logic as the FK +
+Snapshot Pattern: the document the claimant signed must read identically
+in twenty years even if the template was updated, retired, or
+restructured. The template_id FK preserves the relationship for
+reporting; the content_snapshot preserves the historical truth.
+
+markup_percent_snapshot is also captured at document generation, frozen.
+The current tenant ala_markup_percent reflects current configuration; the
+percent that applied to this specific document at the moment it was
+generated is what the claimant agreed to and what the audit trail must
+preserve. Same defensibility logic.
+
+The signer fields (signer_name, signer_email, signed_at) are nullable
+because a document may exist as unsigned (sent to the claimant, awaiting
+response) before becoming signed. signed_at being non-null is the
+architectural marker that the agreement is in force.
+
+Whether to capture the signer as a free-text snapshot (name/email pair,
+as above) or as an FK + Snapshot reference to a contacts row is the same
+question Claim Intake settled for the submitter, with the same answer
+for the same reasons: a signer may be a customer contact or a one-off
+third party, the FK is too heavy for the operational shape, free-text
+snapshots are sufficient. If reporting needs surface that argue for FK +
+Snapshot, this is revisitable.
+
+### ALA markup: 10%, stored at tenants.settings.ala_markup_percent
+
+Decision 7 locked the markup default at 10% (decimal 0.10), stored at
+tenants.settings.ala_markup_percent, with application-layer validation
+bounds of 0 to 0.50. The display layer converts at the edge for human
+display (0.10 -> "10%" in form labels and document text).
+
+A v1 mention referenced 15%. Decision 7 flagged this as possibly
+unsourced and asked v2 drafting to verify against the six claim intake
+workbooks. The workbooks were checked during this section's drafting: no
+markup figure of any kind appears in any of the six workbooks. The v1 15%
+is confirmed as an unsourced figure with no real-world source. Decision
+7's 10% stands as the default. Tenants can configure to any value within
+the 0 to 0.50 bounds.
+
+The markup is captured at document generation through
+markup_percent_snapshot on ala_documents. A tenant who changes their
+ala_markup_percent later does not retroactively change documents already
+generated.
+
+### Indistinct outcome is the trigger
+
+ALA documents exist only for claims whose review outcome is "Indistinct
+Claim — ALA Required" (v1's Outcome 4 from the Six Final Claim Review
+Outcomes). The Server Action handling that outcome creates the ALA
+document from the tenant's default template (or a tenant-selected
+template if more than one exists), populates content_snapshot and
+markup_percent_snapshot, and routes the document to the claimant for
+signature. The Server Action that creates the document is the trigger,
+not a clock event — same convention as registration creation on
+trigger_status confirmation.
+
+Whether the routing-for-signature uses the Stateless Tokenized
+Interaction Pattern, an in-app interface for a known claimant, or some
+other channel depends on the signature mechanism question (see below).
+
+### Signature capture: an open architectural question
+
+Audit Topic 10 flagged the signature mechanism as TBD between tokenized
+form acceptance and wet (physical) signature. None of the locked sources
+— Decision 7, Audit Topic 10, the SOPs that name the Indistinct workflow
+— resolves this. The SOPs say "signed" repeatedly without defining HOW;
+they reference the agreement without specifying how it gets signed.
+
+The question is real because the choice has legal implications. A
+tokenized form-acceptance — claimant clicks a link, reviews the agreement
+text, types their name or clicks "I Agree" — is operationally clean,
+audit-friendly through Stateless Tokenized Interaction Pattern, and
+preserves the entire interaction in the audit trail. Whether that
+constitutes legally enforceable signature for the Owner's Consent's
+purpose varies by jurisdiction and by the warrantor's contractual
+preferences. A wet signature path — claimant prints, signs, scans/uploads
+or mails back — is legally well-established but adds operational
+friction and a document-handling surface.
+
+A third path is also possible: an electronic signature service (DocuSign,
+HelloSign, Adobe Sign) with established legal standing. None of the
+locked sources mention this, but it bridges the two extremes.
+
+The architectural commitment v2 makes: the ala_documents schema supports
+any of these mechanisms — signer_name, signer_email, and signed_at are
+generic enough to capture the outcome of any signing process. The
+question of WHICH mechanism is settled by a future decision, and that
+decision may need to be per-tenant (warrantors operating under different
+contracts or in different jurisdictions may need different mechanisms).
+Flagged as outstanding architectural question; no improvised resolution.
+
+### Blocking-gate behavior
+
+The SOPs are clear and stronger than Audit Topic 10's summary on this
+point. Audit Topic 10 described the ALA as blocking Work Plan workflow.
+The SOPs say the ALA blocks the *claim* from proceeding to investigation,
+not just Work Plan downstream. SOP 1 (Accepted Warranty Claim Lifecycle):
+the ALA "must be signed before the processing and investigation of the
+claim can begin." SOP 0 (Warranty Management System Capabilities): the
+Indistinct Claims "process will only commence following the receipt and
+acceptance of the signed agreement." SOP 4 (Claim Submission
+Requirements): "before [Company Name Here] will proceed."
+
+The blocking relationship is locked architecture: a claim whose outcome
+is Indistinct cannot move forward — neither to investigation nor to work
+plan nor to anything downstream — until its ala_documents row exists and
+has signed_at non-null. The Server Actions that would otherwise advance
+the claim must check for this and refuse the advance if the gate is not
+cleared.
+
+The specific claim-status values that interact with this gate — what
+status the claim is in while awaiting signature, what status it moves to
+on signing, how this composes with the rest of the Six Gates flow — are
+operational state-machine details that the Tier 3 claim lifecycle section
+settles. The architectural commitment is the blocking relationship
+itself; the state-machine particulars are downstream.
+
+### What is NOT in the ALA system
+
+Parallel to the deliberate-omissions lists elsewhere:
+
+- No custom field involvement. Templates are tenant-defined documents,
+  not custom field definitions on the claim. The Custom Field System is
+  for fields that vary by tenant on claim entities; ALA templates are
+  documents.
+- No clock events. ALA generation is a synchronous Server Action effect
+  on the Indistinct outcome, not a future-firing event. Reminder
+  notifications to a claimant who has not signed within some window
+  might use clock events in a future iteration, but no locked source
+  specifies this yet.
+- No automatic enforcement of the markup-bounds at the database level.
+  Decision 7 places that validation in the application layer; the
+  tenants.settings JSONB does not enforce numeric bounds in PostgreSQL
+  by default. The Server Action that updates the setting is the gate.
