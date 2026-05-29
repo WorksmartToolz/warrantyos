@@ -1059,3 +1059,864 @@ schema.sql. The regenerated schema.sql is committed alongside the migration.
 Code review checks that the schema.sql diff matches what the migration says
 it does. No hand-edits to schema.sql — if the diff looks wrong, the
 migration is what gets fixed, and schema.sql is regenerated.
+
+## Project
+
+**Status: Designed** (the sacred root entity; not yet built. projects is a
+Phase 3 table to be migrated. Multi-source trigger model from Item 17 is
+integrated; soft-delete discriminator specified per Decision 5's downstream
+requirement.)
+
+Project is the root entity of the WarrantyOS data model. Every warranty
+registration belongs to exactly one project. Every claim is filed against a
+warranty that belongs to a project. Every work plan executes against a claim
+that traces back to a project. v1 names Project a sacred root in passing but
+does not define the entity; this section is the full definition.
+
+A project represents the unit of warranted work or product delivery — a solar
+installation site under an EPC contract, a racking order to a buyer-installer,
+or any equivalent unit. It is created before its warranty registration exists,
+and the moment of its creation is determined by its trigger source (see
+lifecycle below).
+
+### Schema
+
+    projects
+      id                            uuid PK
+      tenant_id                     uuid NOT NULL FK -> tenants
+      name                          text NOT NULL
+      trigger_source                text NOT NULL
+                                    -- 'contractual_date_manual' |
+                                    --   'wbs_integration' |
+                                    --   'delivery_report_tokenized' |
+                                    --   'delivery_report_api'
+                                    -- CHECK constraint enforces allowed values
+      trigger_status                text NOT NULL DEFAULT 'pending'
+                                    -- 'pending' | 'confirmed' | 'overdue'
+                                    -- CHECK constraint enforces allowed values
+      trigger_date                  date nullable
+                                    -- set when trigger_status becomes
+                                    -- 'confirmed'; null until then
+      integration_config            jsonb nullable
+                                    -- WBS / API integration identity and
+                                    -- project reference; null for non-
+                                    -- integrated trigger sources
+      customer_id                   uuid nullable FK -> contacts
+      customer_name_snapshot        text
+      customer_email_snapshot       text
+      customer_phone_snapshot       text
+      site_address_street           text
+      site_address_city             text
+      site_address_state            text
+      site_address_zip              text
+      imported_via_batch_id         uuid nullable FK -> import_batches
+      deleted_at                    timestamptz nullable
+                                    -- soft-delete discriminator;
+                                    -- non-null means project is retired
+      created_at                    timestamptz NOT NULL DEFAULT now()
+      updated_at                    timestamptz NOT NULL DEFAULT now()
+
+The table follows the Standard RLS Pattern's six steps: tenant_id FK, RLS
+enabled, the standard tenant-scoped SELECT policy, service-role-only writes,
+the required grants. There is no project-level user-facing UPDATE policy —
+project mutations all go through Server Actions.
+
+### No business-visible identifier in Phase 1
+
+Projects have no business-visible identifier — no "PRJ-" prefix, no formatted
+project number, just the uuid primary key. This is deliberate. WarrantyIDs
+appear on warranty registrations and ClaimIDs appear on claims because both
+identifiers serve customer-facing communications. Projects today are internal —
+the customer sees warranties and claims, not projects. If a project number
+becomes operationally necessary later, the ID Generation system's
+tenant_id_sequences pattern accommodates it as a new id_type without
+restructuring; until then, the uuid is enough.
+
+### Multi-source trigger model
+
+Two columns — trigger_source and trigger_status — make the warranty trigger a
+first-class concept on the project. They exist because WarrantyOS serves two
+distinct business shapes that imply different trigger mechanics, and the
+architecture has to accommodate both without making one a special case of the
+other.
+
+**EPC shape.** The warrantor is part of the construction process. The trigger
+date — substantial completion, commercial operation date, commissioning date,
+a contract-defined variance — is known in advance, memorialized in the project
+contract or in a construction-management system. Two trigger_source values
+serve this shape:
+
+- contractual_date_manual — A tenant user enters the trigger date directly at
+  project creation. The default EPC trigger for tenants without WBS-integration
+  tooling.
+- wbs_integration — The trigger date is sourced from a construction-management
+  system (Procore is the canonical example) via API. integration_config holds
+  the external system identity and the project's reference within that system.
+  A poller (driven by Clock Event Infrastructure) reads the external milestone
+  state on a tenant-configurable schedule. When the milestone hits its
+  configured state, the poller captures the timestamp, sets trigger_status to
+  confirmed, and invokes the registration-creation Server Action directly.
+  Concrete vendor integrations are Phase 4+ work; v2 documents the pattern,
+  not the specific integrations.
+
+**Supply-only shape.** The warrantor sells and ships a product but has no site
+presence. The trigger date is the delivery date, and the buyer-installer is the
+sole source of truth for it. This is an asymmetric-information structural
+problem, not a missing feature: the buyer's incentive to volunteer the delivery
+date promptly is not naturally aligned with the warrantor's interest. Two
+trigger_source values serve this shape:
+
+- delivery_report_tokenized — The buyer-installer reports the delivery date
+  through a tokenized email form, using the Stateless Tokenized Interaction
+  Pattern. The form is sent at project creation (sale time), not at expected
+  delivery time, and remains open until the buyer reports. The
+  trigger_confirmation_overdue clock event surfaces silence; what to do about
+  it is operational policy (contractual default-trigger language is the
+  warrantor's backstop, supported by the platform but not enforced
+  automatically).
+- delivery_report_api — A logistics or freight-carrier API confirms delivery.
+  Reserved as a Phase 1 enum value so the future integration path is explicit;
+  concrete carrier integrations are not Phase 3 scope.
+
+The trigger_source enum is extensible. Future sources — customs_release_api,
+inspection_signoff, warrantor_self_report — can be added by later decisions
+without restructuring.
+
+### trigger_status state machine
+
+A project's trigger_status moves through three states:
+
+- pending — the default at project creation. Trigger event has not yet
+  occurred (or, for supply-only, has not been reported).
+- confirmed — trigger event has occurred. trigger_date is captured. Warranty
+  start date is established. This is the state at which registration prep can
+  fire (for trigger sources where prep is post-confirmation) or has fired (for
+  trigger sources where prep is pre-trigger).
+- overdue — the expected trigger window has passed without confirmation.
+  Applies primarily to delivery_report_tokenized (buyer has not responded
+  within the expected delivery window) and to wbs_integration (the integrated
+  milestone has not flipped within its expected timeframe). Surfaces to
+  platform admins and tenant team admins for follow-up.
+
+The transitions are governed by trigger_source. The mechanism by which a
+state change becomes either a future-firing clock event or a synchronous
+Server Action effect is in the lifecycle section below.
+
+### Lifecycle: when projects are created and what fires
+
+This revises Phase 0 item 9, which was originally written EPC-only ("Projects
+exist in WarrantyOS once their contractual milestone date is known.
+Registration prep is triggered registration_lead_time_days before the
+milestone, default 21 days, per-tenant configurable.") The revised wording:
+
+Projects exist in WarrantyOS at the point determined by their trigger source.
+
+- For contractual_date_manual and wbs_integration (EPC shape), the project
+  is created when the trigger date is known in advance. trigger_status starts
+  pending. Registration prep is triggered registration_lead_time_days before
+  the trigger date — a future-firing clock event of type
+  registration_prep_pre_trigger inserted into clock_events at project creation.
+  Default lead time is 21 days, per-tenant configurable.
+- For delivery_report_tokenized and delivery_report_api (supply-only shape),
+  the project is created when the sale occurs. trigger_status starts pending.
+  Registration prep does NOT fire on creation — there is no known trigger date
+  to schedule from. Registration is generated as a synchronous Server Action
+  effect when trigger_status advances from pending to confirmed (because the
+  buyer reported delivery, or the carrier API confirmed it). No clock_events
+  row is created for this; synchronous transitions are not future-firing
+  events.
+
+The same synchronous-versus-scheduled distinction applies to wbs_integration
+once the poller detects the milestone — the registration creation is
+synchronous from the poller's perspective, even though the poller itself runs
+on a clock_events schedule.
+
+### Feature flag gating
+
+Project creation gates on the Feature Flag System's two Phase 1 flags through
+the Defense-in-Depth Pattern's three-layer model. At the schema layer the
+trigger_source column accepts all four values; the database does not enforce
+gating. At the application layer the Server Action creating a project checks
+isFeatureEnabled(tenantId, 'epc_workflow') before allowing
+contractual_date_manual or wbs_integration, and
+isFeatureEnabled(tenantId, 'supply_only_workflow') before allowing
+delivery_report_tokenized or delivery_report_api. At the UI layer the project
+creation form renders only the trigger sources whose flag is enabled, so a
+pure-EPC tenant never sees delivery-report options and a pure-supply-only
+tenant never sees milestone-date entry.
+
+### Customer attribution via FK + Snapshot
+
+A project's customer is recorded using the FK + Snapshot Pattern's single-FK
+shape: customer_id references contacts, with customer_name_snapshot,
+customer_email_snapshot, and customer_phone_snapshot captured at project
+creation. The snapshots preserve audit-defensible historical attribution over
+the long warranty horizon; the FK supports reuse and reporting. See the FK +
+Snapshot Pattern section for the mechanics.
+
+The customer relationship is required for projects to be operationally useful
+— claim intake auto-population, notice generation, and warranty activation
+all depend on it. Decision 8 covers customer data during import; ongoing
+customer creation happens through standard tenant operation.
+
+### Site address
+
+site_address_street, site_address_city, site_address_state, and
+site_address_zip hold the physical location of the warranted work. These are
+project columns, not customer columns, because the customer (the company) and
+the site (the location of the installation) can differ — a customer with
+many sites has many projects at different addresses. Phase 1 keeps the
+address as four scalar columns; structured address handling (geocoding,
+international format support) is deferred.
+
+### Soft-delete via deleted_at
+
+Decision 5 made the project-to-registration FK ON DELETE RESTRICT, which
+blocks hard-deletion of a project that has an associated registration. This
+section delivers the soft-delete discriminator Decision 5 said the Project
+section must specify: a deleted_at timestamptz column, null when the project
+is active, non-null when the project has been retired.
+
+The semantics match the spirit of the users table's removed_at, with one
+difference: users carries both a status column ('active'/'suspended') and
+removed_at, because a user has a meaningful intermediate state. A project
+does not — a project is either active or retired; there is no "suspended
+project" state. So projects use a single discriminator, deleted_at, not the
+two-column users pattern. Naming the column deleted_at rather than removed_at
+also reads more naturally for an inanimate entity.
+
+Operational rules:
+
+- A non-null deleted_at means the project is retired. The row remains in the
+  database — Defensibility requires the historical record to persist — but
+  it is filtered out of normal queries.
+- All standard SELECT queries on projects must include
+  "deleted_at IS NULL" to exclude retired projects, matching the convention
+  already used for removed users.
+- Hard-deletion through the UI is not available. RESTRICT prevents accidental
+  hard-delete of a project that still has a registration — a plain
+  DELETE FROM projects will be refused by the database. Intentional
+  admin-level destruction of the full project + registration + downstream
+  chain is constrained by the absence of an admin UI for it, not by the
+  database constraint alone.
+- A retired project's associated warranty registration is not automatically
+  retired. Cascading the retirement decision is a Phase 4 concern; in Phase 1
+  the operational expectation is that retirement happens before a registration
+  is active.
+
+### Import-tracking
+
+imported_via_batch_id (nullable FK to import_batches) records the data
+migration batch that created the project, if any. Projects created through
+normal tenant operation leave this null. Decision 8 covers the import
+mechanics.
+
+### Multiple projects per tenant; the portfolio view
+
+A tenant has many projects, all scoped through Standard RLS. The "Project
+Portfolio" view that warranty operations teams use is an application-layer
+join over projects, warranty_registrations, claims, and cost-tracking tables
+— not a database view today. Adding a database view is straightforward if
+performance demands it; the portfolio concept does not require one.
+
+### What is NOT on the project
+
+Three things that might be expected but are not project columns, with the
+reason for each:
+
+- No assigned PM column. The Audit Topic 7 gap note floated "Created by PM
+  role" as a possibility, but Decision 1 retired the PM role from the tenant
+  role model. The dual-FK assignee model on warranty_registrations (contact
+  assignee or tenant user assignee) handles "who's running this" at the
+  registration level, not at the project level. If a project needs a "primary
+  contact within the tenant" later, that's a future decision.
+- No business-visible ID. Covered above; the uuid is sufficient for Phase 1.
+- No business-status column beyond deleted_at and trigger_status. A project's
+  business state is derived from its trigger_status, its registration's state,
+  its claims, and its costs — not from a project-level status enum.
+
+## Warranty Registration
+
+**Status: Designed** (Phase 3 table to be migrated. The assignee model is
+locked by Decision 1, the FK direction and 1:1 enforcement by Decision 5, the
+WarrantyID issuance by Decision 2 and Item 17. The Section 7 activation gate's
+specific conditions are not specified at the architectural layer and are
+flagged as a Phase 4 / downstream-operational question.)
+
+A warranty registration is the parent record for one warranty agreement on
+one project. It carries the WarrantyID once issued, tracks the assignee
+responsible for completing activation, and is the immediate parent of the
+warranty coverages and claims that follow. v1 describes registration as a
+lifecycle stage; this section is the entity behind it.
+
+A registration begins life associated with its project but inactive — no
+WarrantyID yet, no coverages billing time toward expiry. It moves through
+preparation and review, passes the Section 7 activation gate, receives its
+WarrantyID, and is then live. Everything downstream — coverages, claims,
+work plans, costs — depends on a live registration.
+
+### Schema
+
+    warranty_registrations
+      id                          uuid PK
+      tenant_id                   uuid NOT NULL FK -> tenants
+                                  -- denormalized per Standard RLS Pattern
+      project_id                  uuid NOT NULL UNIQUE FK -> projects
+                                  -- UNIQUE enforces 1:1; ON DELETE RESTRICT
+      warranty_id                 text nullable
+                                  -- issued at Section 7 activation;
+                                  -- null until then; immutable once set
+      status                      text NOT NULL
+                                  -- minimum values: 'pre_activation',
+                                  -- 'active'. Richer values are a
+                                  -- downstream operational question.
+                                  -- CHECK constraint enforces allowed values
+      assigned_to_contact_id      uuid nullable FK -> contacts(id)
+      assigned_to_user_id         uuid nullable FK -> public.users(id)
+                                  -- CHECK: exactly one non-null when
+                                  -- assigned; both null when unassigned
+      assigned_to_name_snapshot   text nullable
+      assigned_to_email_snapshot  text nullable
+      assigned_to_phone_snapshot  text nullable
+      assigned_at                 timestamptz nullable
+      activated_at                timestamptz nullable
+                                  -- set when status transitions to active
+      created_at                  timestamptz NOT NULL DEFAULT now()
+      updated_at                  timestamptz NOT NULL DEFAULT now()
+      -- CHECK / app-layer invariant: tenant_id matches the referenced
+      -- project's tenant_id
+
+The table follows the Standard RLS Pattern's six steps. tenant_id is
+denormalized onto the registration directly (rather than joined through
+project) per the convention established by Decisions 3 and 5 — the same
+convention the Standard RLS Pattern section documents formally.
+
+### One-to-one with Project, enforced by the database
+
+Phase 0 item 2 says a project and its warranty registration are 1:1
+architecturally. Decision 5 enforces that architecturally-named property at
+the database layer with a UNIQUE constraint on project_id: no second
+registration can be inserted for a project that already has one. The
+relationship's direction — registration carries the FK, project does not —
+matches creation order: project exists first, registration is created
+afterward (the timing depends on trigger_source; see the Project section's
+lifecycle).
+
+The FK is ON DELETE RESTRICT. A plain DELETE FROM projects against a
+project that has a registration will be refused by the database. The
+operational cleanup path for both is soft-delete (deleted_at on projects;
+status transitions on registrations), not hard delete.
+
+### Section 7 activation gate
+
+Section 7 is the structural anchor in registration lifecycle: the gate that
+issues the WarrantyID and transitions the registration to active. v1 and
+Audit Topic 6 both name it but do not specify its contents — what review
+artifacts it requires, what conditions it checks, who has authority to
+clear it. v2 documents Section 7 as the named activation event with the
+state consequences we know:
+
+- Before Section 7 passes: warranty_id is null. status is pre-activation.
+  Coverages may exist as draft, but no claim can be filed and no warranty
+  term is counting.
+- Section 7 passes: the Server Action handling activation generates the
+  WarrantyID from the tenant's warranty_id row in tenant_id_sequences
+  (default format WID-{year}-{seq:06d}, per-tenant configurable). The
+  WarrantyID is written to warranty_id and the column is treated as
+  immutable from that point. status transitions to active. activated_at
+  is captured.
+- After Section 7 passes: the registration is live. Coverages are active,
+  claims can be filed against the registration, customer-facing
+  communications reference the WarrantyID.
+
+The specific conditions Section 7 evaluates — required fields, required
+reviewer approvals, required documents — are not specified at the
+architectural layer in any locked source. This is a Phase 4 or downstream
+operational question. The architecture sets the gate's role (issue the
+WarrantyID and activate); the gate's contents are a separate decision.
+
+### WarrantyID issuance, not assignment at creation
+
+The WarrantyID is issued at Section 7 activation, not assigned at
+registration creation. This matters: a registration's id (uuid PK) exists
+from creation; its WarrantyID does not. The WarrantyID is the business-
+visible identifier that appears in customer-facing communications, and
+issuing it only at activation reflects the operational reality — there is
+no warranty agreement to identify until activation has happened.
+
+Generation goes through tenant_id_sequences in the same transaction as the
+status update to active, so the counter and the activation cannot drift
+apart. See the ID Generation section for the transactional gap-free
+mechanism. Once issued, warranty_id is immutable; this is the Defensibility
+Principle applied to identifiers.
+
+### Assignee: who's responsible for completing activation
+
+A registration is assigned to one party — a directory contact (e.g., a
+subcontractor PM who handles the activation paperwork) or a tenant user
+(e.g., a Reviewer self-handling). The assignment is captured using the FK +
+Snapshot Pattern's dual-FK shape: two nullable FKs with a CHECK enforcing
+exactly one non-null when assigned, plus snapshot columns for name, email,
+phone, and the assigned_at timestamp.
+
+The FK type drives downstream behavior. A contact assignee is reached
+through the Stateless Tokenized Interaction Pattern (a tokenized email link
+to a focused activation form). A tenant-user assignee is reached through an
+in-app notification on their existing login. The two paths are different
+because the parties are different kinds of thing — contacts have no
+account, tenant users do.
+
+Reassignment can cross types. A registration assigned to a contact PM can
+be reassigned to a Reviewer for self-handling, or the reverse. The snapshot
+columns capture the assignment at the moment it was made and are never
+updated on read; reassignment writes a new snapshot. See the FK + Snapshot
+Pattern section for the mechanics.
+
+### Status
+
+A registration carries a status column. Two states are determined by the
+architecture:
+
+- pre-activation — warranty_id is null. activated_at is null. The
+  registration exists but has no business-visible identifier and counts no
+  warranty time. Section 7 has not passed.
+- active — Section 7 has passed. warranty_id is set (immutable from this
+  point), activated_at is set, coverages count time.
+
+Whether the pre-activation state needs to subdivide further (e.g., separate
+pending vs in-review states), and whether richer activation-progress states
+are useful at the architecture layer versus derived from operational fields,
+is a Phase 3 / downstream operational question — same flag as Section 7's
+specific conditions. The architecture establishes that a status column
+exists and carries at minimum the two states above; the closed set of values
+is settled by a separate decision.
+
+A third state — expired — is mentioned operationally (all coverages past
+their end_date), but whether expiry is a status value, a derived condition
+from coverage end_dates, or both, is also part of that downstream
+question.
+
+The column exists rather than being purely derived because queue filters,
+dashboards, and reporting are cleaner against a status column than against
+a multi-field derivation. Adding the column without locking its values is
+the architecturally restrained move.
+
+### Coverages are children of registration
+
+A registration is the parent of one or more warranty coverages (one row per
+warranty type per registration). The Warranty Type Coverages section
+documents the coverages table and the per-tenant configurable warranty
+types they reference. The 1:1 relationship between project and registration
+does not extend to coverages — a registration can have many coverages, one
+per warranty type the tenant offers and the agreement covers.
+
+### Document attachments
+
+Registrations carry document attachments — the artifacts captured during
+activation, customer-signed terms, supporting documents, and so on. Audit
+Topic 6 names a "document categories structure" as a known gap but does
+not specify a categorization schema; no locked source defines what the
+categories are. v2 names the relationship (registrations have associated
+documents) and leaves the categorization schema to downstream operational
+drafting or a future decision. Phase 4 territory.
+
+### Clock-event interactions
+
+A registration's lifecycle touches Clock Event Infrastructure differently
+depending on the project's trigger_source. What Item 17 specifies, what is
+synchronous, and what is open:
+
+- For contractual_date_manual (EPC, known date), the project's creation
+  inserts a registration_prep_pre_trigger event into clock_events, scheduled
+  registration_lead_time_days before the trigger date. When the event fires,
+  registration prep work begins — what specifically happens at firing time,
+  including whether the registration record is created at project creation
+  or at prep-event firing, is not specified by any locked source. v2 names
+  the prep event without resolving the creation-timing question; it's a
+  Phase 4 / downstream operational drafting decision.
+- For wbs_integration (EPC, polled), Item 17 specifies that when the poller
+  detects the milestone in its configured state, it sets trigger_status to
+  confirmed and synchronously invokes the Server Action that creates the
+  warranty registration. No clock_events row is created for the creation
+  itself; the transition is synchronous from the poller's perspective.
+- For delivery_report_tokenized and delivery_report_api (supply-only), Item
+  17 specifies that registration creation is synchronous on trigger_status's
+  transition from pending to confirmed. The Server Action handling the
+  buyer's report (or carrier API confirmation) creates the registration
+  directly. No clock_events row.
+
+Warranty expiry warnings are a separate clock-event interaction. A
+warranty_expiry_warning event fires before each coverage's end_date,
+surfacing the upcoming expiry. The mechanism for transitioning to the
+expired state (whether it's a column update, a derivation, or both) is part
+of the same downstream operational question flagged in the Status section
+above.
+
+### What is NOT on the registration
+
+A short list of deliberate omissions, parallel to the Project section:
+
+- No coverage start_date or end_date. Those live on the warranty_coverages
+  child table, one per warranty type, with end_date derived from
+  start_date + term_years. See the Warranty Type Coverages section.
+- No customer FK. The customer is on the project (FK + Snapshot single-FK
+  shape); the registration inherits its customer through project_id.
+  Duplicating the customer on registration would create a sync surface
+  where there's no need for one.
+- No business-status enum beyond the minimum two states above. Anything
+  more granular about activation progress (which Section 7 fields are
+  complete, which reviewer approvals are in) is downstream operational
+  state, not registration-level state.
+
+## Warranty Type Coverages
+
+**Status: Designed** (Phase 3 tables to be migrated. warranty_types is locked
+by Decision 6 with defense-in-depth anchor protection; warranty_coverages
+follows the shape Audit Topic 8 specifies. The mechanism for end_date
+derivation — application layer vs Postgres generated column — is a Phase 3
+implementation choice flagged below.)
+
+A warranty registration covers one or more warranty types over their own
+terms. Foundation might run 5 years; racking, 25; workmanship, 10. The
+warranty type list is per-tenant configurable so warrantors can name and
+scope coverages to their own product lines, but a small set of types is
+seeded at tenant provisioning so every tenant starts with a working
+baseline. This section documents both tables — warranty_types (the
+configurable list) and warranty_coverages (the per-registration
+instantiations).
+
+### v1's "Equipment and Workmanship sub-tables" is retired
+
+v1 describes the coverage matrix as "Equipment and Workmanship sub-tables" —
+a fixed two-sub-table model where the categorization is baked into the
+schema. v2 retires that model. The per-tenant configurable warranty_types
+table replaces it, with two seeded anchor types — Standard Warranty and
+Workmanship Warranty — that preserve the spirit of v1's two categories as
+defaults without forcing every tenant into them or limiting tenants to two.
+A future reader of v1 alongside v2 should treat the sub-tables language as
+historical; the configurable type list is the current model.
+
+### warranty_types schema
+
+The configurable per-tenant type list:
+
+    warranty_types
+      id            uuid PRIMARY KEY DEFAULT gen_random_uuid()
+      tenant_id     uuid NOT NULL FK -> tenants
+      name          text NOT NULL
+      is_system     boolean NOT NULL DEFAULT false
+                    -- true on anchor types seeded at tenant provisioning;
+                    -- protected from delete and from is_system->false
+      created_at    timestamptz NOT NULL DEFAULT now()
+      updated_at    timestamptz NOT NULL DEFAULT now()
+
+A case-insensitive uniqueness constraint on (tenant_id, name) is enforced by
+a functional index:
+
+    CREATE UNIQUE INDEX warranty_types_tenant_name_lower_unique
+      ON warranty_types (tenant_id, LOWER(name));
+
+"Foundation" and "foundation" within the same tenant would be
+workflow-ambiguous; the LOWER index makes them collide as expected. The cost
+is one composite index; the benefit is clean naming.
+
+The table follows the Standard RLS Pattern's six steps: tenant_id FK, RLS
+enabled, the standard tenant-scoped SELECT policy, service-role-only writes,
+the required grants. Tenant Team Admins manage the type list through Server
+Actions; Reviewers and Viewers consume it.
+
+### Anchor types and the is_system flag
+
+Tenant provisioning seeds two warranty_types rows per new tenant:
+
+- Standard Warranty (is_system = true)
+- Workmanship Warranty (is_system = true)
+
+These are renameable — a tenant can update the name column on either row
+through the standard CRUD path. They are not deleteable, and is_system
+cannot be flipped to false on either. A tenant can add as many additional
+types as it needs (Foundation, Component, Racking, whatever the product
+lines call for); those are added with is_system = false and have no
+special protection.
+
+The architectural commitment behind is_system is that anchor types are
+permanent. A tenant's downstream data — registrations, coverages, claims
+— may reference Standard Warranty for years; orphaning those references
+by deleting the row would corrupt the audit trail. is_system enforces
+permanence.
+
+### Defense-in-depth anchor protection
+
+Decision 6 protects the anchor types through the Defense-in-Depth Pattern,
+the same convention applied to last-admin protection. Two layers:
+
+- Application layer: the Server Action for warranty_types CRUD rejects
+  delete of any row where is_system = true, and rejects UPDATE attempts
+  that flip is_system to false. The user gets a clean, early error
+  before any database exception. This is the UX layer.
+- Database layer: a BEFORE DELETE OR UPDATE trigger function on
+  warranty_types raises an exception for the same conditions —
+  OLD.is_system = true on DELETE, or OLD.is_system = true AND
+  NEW.is_system = false on UPDATE. The trigger is hardened with SET
+  search_path = public per the migration 002 precedent. This is the
+  structural-guarantee layer.
+
+The protection extends to UPDATE of is_system specifically to close the
+two-step exploit: a delete-prevented anchor could otherwise be cleared
+by first flipping is_system to false (no protection check) and then
+deleting (now allowed because is_system is false). Extending the
+protection to the flag itself, not just the row, prevents that path.
+
+The architectural commitment applies to the flag, not just the row —
+this is the same shape Decision 6 names. See the Standard RLS Pattern
+section for the defense-in-depth convention; Decision 6 is one of its
+two named precedents alongside last-admin protection.
+
+### warranty_coverages schema
+
+A coverage is one warranty type's instantiation on one registration. A
+registration has one coverages row per warranty type it covers — a
+Standard Warranty might run alongside a Workmanship Warranty and a
+Racking warranty on the same registration, each with its own start date
+and term.
+
+    warranty_coverages
+      id                          uuid PK
+      tenant_id                   uuid NOT NULL FK -> tenants
+                                  -- denormalized per Standard RLS Pattern
+      warranty_registration_id    uuid NOT NULL FK -> warranty_registrations
+      warranty_type_id            uuid NOT NULL FK -> warranty_types
+      start_date                  date NOT NULL
+      term_years                  integer NOT NULL
+                                  -- a CHECK > 0 is the obvious defensive
+                                  -- constraint; not architecturally locked
+      created_at                  timestamptz NOT NULL DEFAULT now()
+      updated_at                  timestamptz NOT NULL DEFAULT now()
+      -- end_date is derived, not stored — see below
+      -- CHECK / app-layer invariant: tenant_id matches the referenced
+      -- registration's tenant_id
+
+The table follows the Standard RLS Pattern. tenant_id is denormalized
+directly onto the coverage (rather than joined through registration or
+through warranty_type) per the same convention as warranty_registrations
+and custom_field_values.
+
+A natural uniqueness constraint applies: a registration should not have
+two coverages of the same warranty type. Whether this is enforced by a
+UNIQUE (warranty_registration_id, warranty_type_id) index is a Phase 3
+implementation detail; the architectural intent is one row per
+(registration, type) pair.
+
+### end_date is derived, not stored
+
+end_date is not an independent column. It is the value of
+start_date + term_years, computed where it is needed. Two reasons.
+Storing it as an independent column would create a sync surface: an
+update to either start_date or term_years would have to remember to
+update end_date too, or the stored value drifts. Audit defensibility
+also prefers a single source of truth — start_date and term_years are
+what the warranty agreement records; end_date is a calculation.
+
+The mechanism for the derivation is a Phase 3 implementation choice:
+either a Postgres generated column (GENERATED ALWAYS AS (start_date +
+(term_years || ' years')::interval) STORED, which makes end_date
+queryable like a regular column without the sync risk) or
+application-layer computation (every read site computes end_date from
+the two source columns). The generated-column approach is the more
+ergonomic choice — queries can filter and sort on end_date directly —
+but Postgres generated columns have constraints on what expressions
+they accept, and the term_years-to-interval conversion specifically
+should be verified against the production Postgres version. Application
+layer is the always-available fallback. The choice is settled when
+warranty_coverages is migrated; the architectural commitment (derived,
+not stored as an independent column) holds either way.
+
+### Coverages and the registration's status
+
+A coverage's start_date and term_years are recorded at registration time,
+but the coverage does not "count time" until the registration is active.
+Pre-activation, the coverage row may exist as draft. Once Section 7
+passes and the registration becomes active, the coverages are live.
+
+The expiry warning is a clock event, not a column update. A
+warranty_expiry_warning event in clock_events fires before each
+coverage's computed end_date, surfacing the upcoming expiry. The
+mechanism for the registration's transition to expired (whether driven
+by all-coverages-past-end-date as a derived state or as an explicit
+status update) is part of the Warranty Registration section's
+status-enum open question.
+
+### What is NOT on the coverage
+
+A parallel deliberate-omissions list:
+
+- No end_date column. Covered above; derived, not stored.
+- No business-visible identifier. Coverages are referenced internally
+  by uuid; the customer sees warranties (WarrantyID) and claims
+  (ClaimID), not individual coverage rows.
+- No coverage-level status enum. A coverage's state is derived from
+  its registration's status and its own end_date — active when
+  registration is active and now < end_date, expired when now >
+  end_date.
+
+## Claim (Shell)
+
+**Status: Designed at the shell level.** This section documents the claim
+entity's existence, its FK relationships, and its identifier mechanism. The
+intake data model — what fields the intake form captures, how the schema
+accommodates per-tenant variation across the six claim intake workbooks, the
+tokenized intake link mechanics, and the operational status state machine —
+is Tier 3 work, deferred to a later v2 section that depends on the workbooks
+as source material. Phase 3 table to be migrated; the schema below is the
+shell scope only.
+
+A claim is the record of a customer's report against a live warranty
+registration. It is the lifecycle stage where warranty operations work
+moves from anticipation (registration, coverage) to response (intake, review,
+work plans, costs, outcome). Every claim belongs to one warranty registration;
+every registration may have zero, one, or many claims over the warranty
+horizon.
+
+### Shell schema
+
+The shell-level columns — the ones the architecture locks at Tier 2,
+independent of intake form contents:
+
+    claims
+      id                    uuid PK
+      tenant_id             uuid NOT NULL FK -> tenants
+                            -- denormalized per Standard RLS Pattern
+      warranty_registration_id  uuid NOT NULL FK -> warranty_registrations
+      claim_id              text NOT NULL
+                            -- generated at claim creation; immutable
+                            -- once set; default format CLM-{year}-{seq:07d}
+      status                text NOT NULL
+                            -- minimum value: 'intake_received'. Richer
+                            -- values reflect v1's Six Gates and are a
+                            -- Tier 3 / downstream operational question.
+                            -- CHECK constraint enforces allowed values
+      created_at            timestamptz NOT NULL DEFAULT now()
+      updated_at            timestamptz NOT NULL DEFAULT now()
+      -- intake form fields (hard columns + JSONB) are Tier 3 work
+      -- and are NOT in this shell schema
+      -- CHECK / app-layer invariant: tenant_id matches the referenced
+      -- registration's tenant_id
+
+The table follows the Standard RLS Pattern's six steps: tenant_id FK, RLS
+enabled, the standard tenant-scoped SELECT policy, service-role-only writes,
+the required grants. tenant_id is denormalized onto the claim directly per
+the convention.
+
+### ClaimID is an independent sequence, not derived from WarrantyID
+
+v1 specifies the ClaimID format as [WarrantyID]-C[NNNN] — a derivative
+form where the ClaimID inherits the WarrantyID and appends a per-warranty
+counter. v2 retires that model. ClaimIDs are now an independent per-tenant
+sequence, generated from tenant_id_sequences with the id_type claim_id and
+the default format CLM-{year}-{seq:07d}, per-tenant configurable through the
+ID Generation system.
+
+A future reader of v1 alongside v2 should treat the inheriting format as
+historical; the independent CLM- format is the current model. The change is
+deliberate. The independent sequence is cleaner operationally (claim
+counters do not interact with warranty issuance), aligns with how ClaimIDs
+appear in customer communications (ClaimIDs are referenced on their own
+terms, not as suffixes on a WarrantyID), and uses the same id_type
+infrastructure as WarrantyIDs without inventing a parallel inheritance
+mechanism.
+
+Generation goes through tenant_id_sequences in the same transaction as the
+claim insert. If the insert rolls back, the counter rolls back — no gaps.
+See the ID Generation section for the transactional gap-free mechanism.
+Once issued, claim_id is immutable; this is the Defensibility Principle
+applied to identifiers, the same as WarrantyID.
+
+### Parent: warranty_registrations
+
+A claim's parent is its warranty registration, via warranty_registration_id.
+A registration may have many claims over the warranty horizon; the
+relationship is one-to-many. There is no UNIQUE constraint on the FK — a
+registration can accumulate claims throughout its active period.
+
+The FK direction matches creation order: a registration exists before a
+claim can be filed against it.
+
+Claim eligibility rules — whether a claim can be filed against a
+pre-activation registration, how emergency claims are handled (v1's
+Acknowledged Warranty Claim Lifecycle SOP carves out emergency
+stabilization with a 24-hour formal-filing window), the relationship
+between Section 7 and claim filing — are Tier 3 work, deferred to the
+claim lifecycle section.
+
+ON DELETE behavior on this FK is not yet locked. The architectural
+parallel to projects-to-registrations (RESTRICT, with soft-delete the
+operational cleanup path) suggests the same restraint here, but the
+specific clause is a Phase 3 implementation detail.
+
+### Status
+
+Following the same architecturally-restrained pattern as Warranty
+Registration's status:
+
+- intake_received is the minimum starting state — a claim row exists, the
+  initial intake has been captured. Beyond this, the operational state
+  machine reflects v1's Six Gates structure (Gate 1 through Gate 6) plus
+  outcome states, but the closed set of values, the transitions between
+  them, and the rules governing each transition are Tier 3 / downstream
+  operational work.
+
+The status column exists at the shell level for the same reason
+Warranty Registration's does: queue filters, dashboards, and reporting
+are cleaner against a column than against a derivation. The
+architectural commitment is the column itself; the values are settled
+when the Tier 3 claim lifecycle section is drafted against v1's Six
+Gates structure and the six claim intake workbooks.
+
+### Custom field support
+
+Claim is one of the three Phase 1 entities that support custom fields,
+per Decision 3 — the others are project and warranty_registration. A
+tenant Team Admin can define custom fields on claims through the Custom
+Field System; values for those fields are stored in custom_field_values
+with the claim_id FK set. The shell schema above does not list custom
+fields because they live in a separate table; the Custom Field System
+section documents the mechanism.
+
+### What Tier 3 will add to this entity
+
+Tier 3 work picks up from this shell and adds the operational data model.
+Named explicitly so a future reader knows where to look:
+
+- The intake form's field schema — the hybrid approach of hard columns
+  for universal queryable fields (claim date, claimant identity, claim
+  type, current gate) plus JSONB for warrantor-configurable fields
+  varying across the six claim intake workbooks. Audit Topic 9 sketches
+  the hybrid approach; the workbooks settle which fields are hard versus
+  JSONB.
+- The tokenized intake link mechanism — the customer-facing application
+  of the Stateless Tokenized Interaction Pattern, with the token stored
+  on its own record per the "shape to copy, not shared store" rule from
+  the pattern section.
+- The claim status state machine — the closed set of status values
+  including Gate 1 through Gate 6 and outcome states, the transitions
+  between them, the actors authorized for each transition, and the
+  effects of each.
+- Claim eligibility rules — pre-activation handling, emergency claim
+  carve-outs, the relationship between Section 7 and claim filing.
+- The relationships to downstream entities — work plans, service
+  reports, ALA documents, escalation pathways, and cost tracking are
+  all claim-level concerns drafted in their own Tier 3 sections, with
+  the claim as their parent.
+
+### What is NOT in the shell
+
+A short list of deliberate omissions, parallel to the Project and
+Warranty Registration sections:
+
+- No intake form fields. Hybrid schema is Tier 3.
+- No tokenized link columns. Tokenized intake is Tier 3.
+- No gate-level state columns. The Six Gates lifecycle is operational
+  structure, modeled in the status column's value set at Tier 3.
+- No claimant FK or snapshot. Whether the claimant is captured as a
+  contact (FK + Snapshot single-FK shape, parallel to projects.customer_id)
+  or differently is a Tier 3 decision.
