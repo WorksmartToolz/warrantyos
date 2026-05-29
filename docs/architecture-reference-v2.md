@@ -2516,3 +2516,261 @@ Parallel to the deliberate-omissions lists elsewhere:
   Decision 7 places that validation in the application layer; the
   tenants.settings JSONB does not enforce numeric bounds in PostgreSQL
   by default. The Server Action that updates the setting is the gate.
+
+## Inspections Foundation
+
+**Status: Designed at the shell level.** This section locks the inspections
+table foundation per Audit Topic 11's explicit "build the table now, build
+the UI later" framing. The schema, the two performer/payer enum columns,
+the status enum, and the inspection_report JSONB are settled. Audit Topic
+11 proposed a single type enum (internal | third_party | customer_paid)
+that conflated three orthogonal axes; Phase 3 design against operational
+reality surfaces a case the conflated enum cannot express (a customer-
+requested inspection where the warrantor performs and the warrantor is
+paid), so this section revises the audit's framing into separate columns
+for who performs and who pays. The audit's substance is preserved; the
+schema shape is updated. The operational workflow that uses these states
+— when an inspection is triggered, who has authority to move an inspection
+from requested to scheduled, how findings feed back into claim status,
+whether and how claimant attendance is modeled, whether the requester is
+modeled — is not in this section. Audit Topic 11 framed this as a
+foundation that costs little to build now and a lot to retrofit later;
+later Tier 3 sections (claim lifecycle, work plan workflow) settle the
+workflow specifics.
+
+Inspections are claim-level investigations into a defect's cause, scope,
+or fix. The warranty professional uses them when the information in a
+claim is insufficient to determine corrective actions, or when an
+Indistinct claim needs investigation before warranty determination. The
+SOPs reference "Joint Inspection" as a posture the warrantor may offer —
+extending a courtesy invitation for the claimant to attend the inspection
+as a transparency measure. The inspection proceeds whether or not the
+claimant actually attends; "joint" is not a separate kind of inspection
+and is not tied to any one performer/payer combination. It is orthogonal
+to both axes defined below — any combination of performer and payer may
+be jointly attended or not. v1's Six Gates also reference inspection at
+Gate 3 (Evidence Evaluation) and downstream.
+
+### Schema
+
+    inspections
+      id                    uuid PK
+      tenant_id             uuid NOT NULL FK -> tenants
+                            -- denormalized per Standard RLS Pattern
+      claim_id              uuid NOT NULL FK -> claims
+      performed_by          text NOT NULL
+                            -- 'warrantor' | 'third_party'
+                            -- CHECK constraint enforces allowed values
+      paid_by               text NOT NULL
+                            -- 'warrantor' | 'claimant' | 'third_party'
+                            -- CHECK constraint enforces allowed values
+      status                text NOT NULL DEFAULT 'requested'
+                            -- 'requested' | 'scheduled' | 'in_progress' |
+                            --   'completed'
+                            -- CHECK constraint enforces allowed values
+      inspection_report     jsonb nullable
+                            -- per-inspection findings, structured per
+                            -- inspection shape; null until findings are
+                            -- captured
+      created_at            timestamptz NOT NULL DEFAULT now()
+      updated_at            timestamptz NOT NULL DEFAULT now()
+      -- CHECK / app-layer invariant: tenant_id matches the referenced
+      -- claim's tenant_id
+
+The table follows the Standard RLS Pattern's six steps: tenant_id FK, RLS
+enabled, the standard tenant-scoped SELECT policy, service-role-only
+writes, the required grants. tenant_id is denormalized onto the inspection
+directly per the convention.
+
+A claim may have zero, one, or many inspections over its lifecycle. There
+is no UNIQUE constraint on claim_id — a single claim might involve
+multiple inspections (an initial internal inspection, then a third-party
+expert inspection if the first is inconclusive, for example).
+
+ON DELETE behavior on the claim_id FK is not yet locked. The
+architectural parallel to other claim-child entities (RESTRICT, with
+soft-delete as the operational cleanup path) suggests the same restraint
+here, but the specific clause is a Phase 3 implementation detail.
+
+### performed_by and paid_by: two orthogonal axes
+
+Audit Topic 11 proposed a single type enum with three values: internal,
+third_party, customer_paid. The values try to express both who runs the
+inspection and who pays for it through one column, but the two questions
+are orthogonal. internal means "warrantor performs AND warrantor pays."
+third_party means "third party performs AND warrantor pays the third
+party." customer_paid means "claimant pays" without saying who performs.
+The collapse breaks down on real operational cases — for example, a
+customer-requested inspection where the warrantor performs the work and
+the warrantor is paid by the customer for the time. That case has no
+home in the conflated enum.
+
+The revised shape splits the question into two explicit columns:
+
+- performed_by captures WHO PERFORMS the inspection. Two values:
+  warrantor (the warrantor's own personnel conduct the inspection) or
+  third_party (an external expert, subcontractor, structural engineer,
+  manufacturer's representative, or independent investigator conducts
+  it).
+- paid_by captures WHO PAYS for the inspection. Three values: warrantor,
+  claimant, or third_party (vendor reimbursement, insurer-funded
+  inspection, or similar cases where the cost is borne by a party
+  external to the warrantor-claimant relationship).
+
+The two columns are independent. Any performer-payer combination is
+valid:
+
+- performed_by = warrantor, paid_by = warrantor — the warrantor's own
+  investigation, on the warrantor's dime. The classic internal
+  inspection.
+- performed_by = third_party, paid_by = warrantor — the warrantor
+  contracts an external expert. The classic third-party expert
+  inspection.
+- performed_by = third_party, paid_by = claimant — the claimant funds
+  an external investigation, typically to demonstrate the basis of
+  their claim under the Burden of Proof principle, or as part of an
+  Indistinct Claims investigation governed by an ALA.
+- performed_by = warrantor, paid_by = claimant — the claimant funds a
+  warrantor-performed investigation. The case Audit Topic 11's conflated
+  enum couldn't express. Common shape: the claimant requests the
+  warrantor's expertise and pays for the warrantor's time.
+- performed_by = warrantor, paid_by = third_party — vendor reimbursement
+  or insurer-funded inspection where the warrantor's team performs but
+  the cost is recovered from a vendor under their warranty or from an
+  insurance carrier. The conflated enum couldn't express this either.
+- performed_by = third_party, paid_by = third_party — a vendor's own
+  inspection of their product, or an insurer's inspection, with the
+  vendor or insurer bearing the cost.
+
+The combinations are not all equally common, but each is operationally
+real, and the schema supports each natively. The cost-tracking and
+authority paths follow from the columns: the cost-tracking section
+reads paid_by to determine the cost recovery path; the authority
+checks read performed_by to determine which credentials apply.
+
+Adding a new performer or payer value (a fourth performer category, or
+a fifth payer category) is a future decision, not anticipated by the
+locked sources. The two enums are extensible without restructuring the
+shape.
+
+### status: the inspection state machine
+
+The four status values are all architecturally meaningful:
+
+- requested — the inspection has been initiated as a record but is not
+  yet scheduled. The default at row creation. Captures the warranty
+  professional's decision (or response to a claimant request) that an
+  inspection is needed but the logistics haven't been settled.
+- scheduled — a date and performing party are set. SOP 0 names
+  inspection scheduling as part of platform capability ("schedule and
+  coordinate inspections"). For warrantor-performed inspections this is
+  when the warrantor's team has a date; for third-party-performed, when
+  the external party has confirmed.
+- in_progress — the inspection is actively underway. The state exists
+  because some inspections span multiple days or sessions, and
+  downstream workflows (notifications, status displays, queue filters)
+  need to distinguish active inspections from those merely scheduled.
+- completed — findings are captured. The inspection_report JSONB is
+  typically populated at this transition, though the field is nullable
+  to support partial-completion edge cases that downstream operational
+  drafting may surface.
+
+Unlike the Warranty Registration and Claim shell status columns — which
+v2 deliberately left under-specified at the architectural level — these
+four inspection states are locked, because each unlocks distinct
+downstream behavior and the audit's listing of all four is corroborated
+by SOP language on scheduling and capturing findings.
+
+### inspection_report: JSONB for per-shape variation
+
+inspection_report is JSONB rather than a set of hard columns because
+different inspection shapes capture different findings. A warrantor-
+performed inspection on a foundation issue might capture pile depths,
+soil conditions, and corrective recommendations; a third-party
+engineer's report on a racking failure might capture load calculations
+and failure mode analysis; a vendor-paid inspection might capture a
+contracted investigator's narrative report. Forcing all of these into a
+uniform hard-column shape would either constrain what can be captured or
+proliferate columns most inspections leave null.
+
+JSONB matches the same convention used for claim_type_data on claims:
+variable-schema-by-discriminator data goes in JSONB, validated
+application-layer against the expected shape per inspection shape. The
+expected JSONB shapes for each performer/payer combination are not
+specified at the architectural level — that's downstream operational
+drafting, when each inspection shape's report structure is worked out.
+
+### Cross-entity dependencies (deferred)
+
+Real cross-entity dependencies this shell participates in, deferred to
+downstream sections:
+
+- Customer Work Authorization before a site inspection commences. SOP 1
+  (Accepted Warranty Claim Lifecycle) is explicit on this for the case
+  where the warrantor's team will be on-site: the warranty professional
+  must request a customer Work Authorization before the on-site
+  inspection can commence. The relationship between inspections and the
+  Work Authorization entity is operational workflow, not this section's
+  scope. Flagged for the Tier 3 Work Plan Workflow section.
+- ALA gate for inspections on Indistinct claims. An inspection on an
+  Indistinct claim presumably cannot commence until the ALA is signed
+  (the SOPs' blocking-gate language about claim processing applies).
+  The specific interaction — whether an inspection record exists in
+  requested state pre-ALA and advances to scheduled post-ALA, or whether
+  it cannot be created at all pre-ALA — is operational and is settled by
+  the Tier 3 claim lifecycle section in concert with the ALA System
+  section.
+- Custom field involvement. Inspections are not in Decision 3's Phase 1
+  custom-field entity scope (projects, warranty_registrations, claims).
+  Audit Topic 11 explicitly framed inspection_report JSONB as the
+  flexibility mechanism in lieu of custom fields. A tenant wanting to
+  capture inspection-specific tenant-shaped data does so through
+  inspection_report JSONB; the platform does not extend custom field
+  support to inspections in Phase 1.
+- Claimant attendance ("Joint Inspection" posture). Whether
+  claimant-invitation or claimant-attendance is captured as a structured
+  data point on inspections (e.g., a claimant_invited boolean, a
+  claimant_attended boolean, or both) or remains an operational practice
+  not modeled in the schema is a downstream decision. The architecture
+  commits to performed_by and paid_by; claimant-attendance is additive
+  and operational, orthogonal to both axes.
+- Inspection requester (who asked for the inspection). Whether the
+  requester axis — warrantor-initiated vs claimant-initiated — is
+  captured as a structured data point on inspections (e.g., a
+  requested_by column, a claimant_initiated boolean), or remains
+  operational practice not modeled in the schema, is a downstream
+  decision. The architecture commits to performed_by and paid_by;
+  requester is additive and operational, a third orthogonal axis the
+  shell does not lock.
+
+### Clock event interactions (open)
+
+The scheduled status implies a future date, which suggests clock_events
+could fire reminders or notify of upcoming inspections. Whether this is
+actually wired — whether scheduled inspections insert clock_events rows
+for reminder firing, or whether reminders are derived at read time from
+the schedule date elsewhere — is not specified by Audit Topic 11.
+Flagged for downstream operational drafting. The Clock Event
+Infrastructure supports the addition of inspection-related event types
+without restructuring.
+
+### What is NOT in the inspections foundation
+
+Parallel to the deliberate-omissions lists elsewhere:
+
+- No scheduled_at column, no scheduled_party column, no findings column,
+  no recommendations column. All of this is operational detail that
+  lives inside inspection_report JSONB per shape, or in downstream
+  entity tables (Work Authorization, work plans) where the dependencies
+  surface. Audit Topic 11's framing was "the foundation costs little;
+  the workflow comes later" — this section honors that.
+- No claimant-attendance columns. Flagged above as a downstream question
+  orthogonal to the two locked axes.
+- No requester columns. Flagged above as a third downstream axis.
+- No UI mechanics. Whether inspection requests originate from a Six
+  Gates review interface, a dedicated inspections queue, or somewhere
+  else is UI design, not architecture.
+- No cost-tracking columns. Cost tracking has its own Tier 3 section per
+  v1's Cost Tracking lifecycle stage; inspection costs feed that
+  section's schema (which reads paid_by to determine the cost recovery
+  path), they don't live here.
