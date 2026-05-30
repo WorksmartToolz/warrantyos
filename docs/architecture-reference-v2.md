@@ -2774,3 +2774,417 @@ Parallel to the deliberate-omissions lists elsewhere:
   v1's Cost Tracking lifecycle stage; inspection costs feed that
   section's schema (which reads paid_by to determine the cost recovery
   path), they don't live here.
+
+## Service Report Submission
+
+**Status: Designed at the architectural level.** This section is sourced
+primarily from SOP 5 (Submitting a Warranty Service Report), with
+cross-references to SOP 1 (Accepted Warranty Claim Lifecycle) for the
+three-day customer review window and Assumption of Acquiesce, and SOP 0
+(Warranty Management System Capabilities) for the platform capability
+framing. The schema, the submitter dual-FK shape, the customer review
+mechanism, the three-day clock event, and the universal content fields
+are settled. List-shaped content items (parts, photos) face the same
+JSONB-vs-child-table question as supporting_documents on Claim Intake;
+that choice is flagged as Phase 3 implementation detail. The downstream
+operational state machine (which specific claim status values transition
+on submission, review, acceptance, dispute) belongs to the Tier 3 claim
+lifecycle section.
+
+A Warranty Service Report is the structured record of completed repair
+work, prepared by whoever performed the repair and submitted to the
+warranty professional for review. It is the bridge between Work Plan
+execution and claim closure: the work is done, the report documents what
+was done, the customer reviews the assertion of completion, and the
+claim closes when the customer accepts (explicitly or by silence under
+the Assumption of Acquiesce). SOP 5's framing is that this process
+"ensures there is a clear and documented trail of the repair work
+performed under the warranty claim, allowing for transparency and
+accountability."
+
+### One service report per claim, structurally
+
+A claim has at most one Warranty Service Report. Multiple repair attempts
+on the same claim — if the first work was inadequate and a follow-up is
+needed — are operational details that resolve through the dispute
+resolution path, not through multiple service reports on one claim. If
+operational reality surfaces a need for multiple reports per claim, the
+UNIQUE constraint below relaxes; the architectural commitment as of this
+section is one-to-one.
+
+### Schema
+
+    service_reports
+      id                            uuid PK
+      tenant_id                     uuid NOT NULL FK -> tenants
+                                    -- denormalized per Standard RLS Pattern
+      claim_id                      uuid NOT NULL UNIQUE FK -> claims
+                                    -- UNIQUE enforces 1:1 with claim;
+                                    -- ON DELETE behavior is a Phase 3
+                                    -- implementation detail parallel to
+                                    -- other claim-child FK flags
+      submitted_by_contact_id       uuid nullable FK -> contacts(id)
+      submitted_by_user_id          uuid nullable FK -> public.users(id)
+                                    -- CHECK: exactly one non-null when
+                                    -- submitted; both null when the
+                                    -- report is in pre-submission draft
+      submitted_by_name_snapshot    text nullable
+      submitted_by_email_snapshot   text nullable
+      submitted_by_phone_snapshot   text nullable
+      submitted_at                  timestamptz nullable
+                                    -- set when the report is submitted
+                                    -- (transitions from draft to
+                                    -- submitted)
+      corrective_actions            jsonb NOT NULL
+                                    -- description of what was done,
+                                    -- ProseMirror-compatible JSON per
+                                    -- Decision 4 (rich text)
+      repair_started_at             timestamptz NOT NULL
+      repair_completed_at           timestamptz NOT NULL
+                                    -- duration is derived from the two
+                                    -- timestamps; unit (hours, days,
+                                    -- business days) is a display
+                                    -- decision, not a storage decision
+      personnel                     jsonb NOT NULL
+                                    -- array of {name, role} objects;
+                                    -- locked as JSONB (not child table)
+                                    -- because no downstream join surface
+      parts_used                    jsonb nullable
+                                    -- array of {part, quantity, ...}
+                                    -- entries; JSONB-vs-child-table is
+                                    -- a Phase 3 implementation detail
+                                    -- (cost-tracking joins may pull
+                                    -- this toward a child table)
+      photos                        jsonb nullable
+                                    -- array of {url, caption?, category?}
+                                    -- entries with before/during/after
+                                    -- categorization; JSONB-vs-child-
+                                    -- table is a Phase 3 implementation
+                                    -- detail (same as supporting_
+                                    -- documents on Claim Intake)
+      challenges_encountered        jsonb nullable
+                                    -- rich text, ProseMirror-compatible
+                                    -- JSON; nullable because some repairs
+                                    -- have no challenges to note
+      resolution_status             text NOT NULL
+                                    -- 'fully_resolved' |
+                                    --   'further_work_needed'
+                                    -- CHECK constraint enforces allowed
+                                    -- values
+      further_work_explanation      jsonb nullable
+                                    -- rich text, ProseMirror-compatible
+                                    -- JSON; required when
+                                    -- resolution_status =
+                                    -- 'further_work_needed' (enforced
+                                    -- application-layer)
+      reviewer_user_id              uuid nullable FK -> public.users(id)
+                                    -- the warranty professional who
+                                    -- reviewed; nullable until reviewed
+      reviewer_decision             text nullable
+                                    -- 'accepted' | 'rejected'
+                                    -- CHECK constraint enforces allowed
+                                    -- values
+      reviewed_at                   timestamptz nullable
+      customer_review_token         text nullable
+                                    -- single-use token for the customer's
+                                    -- tokenized review link; null until
+                                    -- the report is reviewer-accepted
+                                    -- and the customer link is issued
+      customer_review_token_expires_at  timestamptz nullable
+      customer_decision             text nullable
+                                    -- 'accepted' | 'disputed'
+                                    -- CHECK constraint enforces allowed
+                                    -- values; silence-acceptance is
+                                    -- captured as customer_decision =
+                                    -- 'accepted' with
+                                    -- accepted_by_acquiescence = true,
+                                    -- not as a distinct enum value
+      accepted_by_acquiescence      boolean nullable
+                                    -- set to true only when the clock
+                                    -- event fires the silence-acceptance
+                                    -- path; null in all other cases
+                                    -- (including explicit accepts and
+                                    -- disputes)
+      customer_decided_at           timestamptz nullable
+      customer_dispute_details      jsonb nullable
+                                    -- rich text, ProseMirror-compatible
+                                    -- JSON; populated when
+                                    -- customer_decision = 'disputed'
+      created_at                    timestamptz NOT NULL DEFAULT now()
+      updated_at                    timestamptz NOT NULL DEFAULT now()
+      -- CHECK / app-layer invariant: tenant_id matches the referenced
+      -- claim's tenant_id
+
+The table follows the Standard RLS Pattern's six steps: tenant_id FK, RLS
+enabled, the standard tenant-scoped SELECT policy, service-role-only
+writes, the required grants. tenant_id is denormalized onto the report
+directly per the convention.
+
+Rich text fields (corrective_actions, challenges_encountered,
+further_work_explanation, customer_dispute_details) use the
+ProseMirror-compatible JSON format from Decision 4, the same convention
+as detailed_description on claims, ALA template content, and rich-text
+custom field values. The character cap defaults from Decision 4 apply.
+
+### The seven SOP content items, mapped
+
+SOP 5 enumerates seven specific things a Warranty Service Report
+contains. Each maps to a column or set of columns above:
+
+1. "A description of the corrective actions taken" -> corrective_actions
+2. "The date and duration of the repair work" -> repair_started_at plus
+   repair_completed_at (duration is derived from the two timestamps;
+   display unit — hours, days, business days — is a presentation choice)
+3. "The names and roles of the personnel involved" -> personnel
+4. "Any parts or materials used during the repair" -> parts_used
+5. "Photographs or other visual evidence of the work before, during, and
+   after completion" -> photos
+6. "Any challenges or issues encountered during the repair process"
+   -> challenges_encountered
+7. "Confirmation of whether the issue has been fully resolved or if
+   further work is necessary" -> resolution_status plus
+   further_work_explanation
+
+The seven items are universal across all warrantors and all claim types
+— SOP 5 describes them as the standard report content, with no
+warrantor-configurable variation. This is the opposite of claim_type_data
+on claims, where the schema varies by discriminator. Here the schema is
+uniform.
+
+### Submitter capture: Decision 1's dual-FK pattern
+
+The submitter columns (submitted_by_contact_id, submitted_by_user_id,
+the three snapshot columns, submitted_at) apply Decision 1's dual-FK +
+Snapshot Pattern. The mechanics are defined in the FK + Snapshot Pattern
+section; no new commitment is being made — same pattern, different
+context.
+
+The structural reason for dual-FK here, rather than free-text capture as
+Claim Intake uses for its submitter: a service report submitter is
+always one of two known operational roles — a subcontractor (directory
+contact, contact_type = subcontractor_contact) or a warrantor self-perform
+tenant user. Never a one-off third party, unlike claim submitters who
+might be a customer's facilities manager, a one-time installer, or some
+other party. Free-text snapshots are appropriate for the unbounded
+claim-submitter case; the dual-FK + Snapshot pattern is appropriate for
+the bounded service-report-submitter case where the audit-defensibility
+benefit of contact-FK reuse (recognizing a recurring subcontractor across
+many service reports) outweighs the cost of the dual-FK shape.
+
+This contrast — Claim Intake submitter = free-text snapshot; Service
+Report submitter = dual-FK + Snapshot — is intentional and reflects the
+different operational shapes. A future reader looking at "why one way
+here and the other way there" finds the answer in this paragraph.
+
+### Submission routing follows the FK type
+
+Routing the service report submission to its submitter mirrors Decision
+1's assignee routing exactly: a contact submitter receives a tokenized
+email link via the Stateless Tokenized Interaction Pattern, opening a
+focused submission form with no account required; a tenant-user
+submitter uses the in-app submission form on their existing login. Same
+two channels for the same operational reason — contacts have no account,
+tenant users do. The pattern's "shape to copy, not shared store" rule
+applies: the submitter's tokenized link has its own storage (likely a
+column or columns on this table, parallel to customer_review_token
+below; the exact shape is a Phase 3 implementation detail), not the
+invitations table.
+
+SOP 1 corroborates that the subcontractor is "prompted via electronic
+notice to submit a Warranty Service Report through the WMS upon reaching
+the projected completion date specified in the approved work plan."
+This is the contact-submitter path; the tenant-user path is the
+self-perform variant.
+
+### Reviewer step
+
+After submission, the warranty professional (a tenant user, captured in
+reviewer_user_id) reviews the report. SOP 5 and SOP 1 both describe this
+step: "The warranty professional reviews the Warranty Service Report to
+ensure that the work has been completed according to the Work Plan and
+meets the required standards." The reviewer_decision column captures
+the outcome ('accepted' or 'rejected'), and reviewed_at captures when.
+
+A rejected report goes back to the submitter for revision; the
+operational mechanics of revision (whether a new report row is created,
+or the existing row is reopened) are downstream operational drafting,
+not locked here. The architectural commitment is that the reviewer step
+exists and is captured.
+
+An accepted report triggers the customer notification step.
+
+### Customer review: tokenized link, three outcomes captured in two columns
+
+When the warranty professional accepts the report, the customer is
+notified per SOP 5: "The customer is then notified of the completion and
+provided with a copy of the Warranty Service Report for their review.
+This notification may also include a Notice of Resolution, which allows
+the customer to review and either accept or reject the assertion of
+completion."
+
+The customer is a non-authenticated party — by definition the Stateless
+Tokenized Interaction Pattern's customer case. The customer receives a
+tokenized link (customer_review_token, with customer_review_token_expires_at
+governing the three-day window) opening a focused interface with three
+possible actions: accept the report, dispute the report, or take no
+action. This is the fourth canonical use of the Stateless Tokenized
+Interaction Pattern, after claim intake, registration assignee
+submission, and supply-only delivery reporting.
+
+The three outcomes are captured in two columns. SOP 1 is explicit that
+silence is structurally treated as acceptance ("the warrantor shall
+consider the silence acceptance"), so the customer_decision enum has
+only two values — accepted and disputed — and the silence-acceptance
+case is recorded as accepted with provenance preserved in
+accepted_by_acquiescence:
+
+- Explicit acceptance: customer_decision = 'accepted',
+  accepted_by_acquiescence = null, customer_decided_at = the moment
+  the customer clicked through.
+- Dispute: customer_decision = 'disputed', accepted_by_acquiescence =
+  null, customer_decided_at = the moment the customer submitted their
+  dispute, customer_dispute_details populated. SOP 5: "If the customer
+  disputes the completion, before the dispute window closes the
+  warranty professional will work with the customer to address their
+  concerns and take any necessary corrective actions." The dispute
+  resolution path is operational and is settled by the Tier 3 claim
+  lifecycle section.
+- Silence-acceptance: customer_decision = 'accepted',
+  accepted_by_acquiescence = true, customer_decided_at = the moment
+  the clock event processed. SOP 1 names this the Assumption of
+  Acquiesce: "If the customer fails to respond inside of the three-day
+  confirmation/rejection period the warrantor shall consider the
+  silence acceptance and close the claim for further activity."
+
+The choice to model silence-acceptance as accepted-with-provenance
+rather than as a third enum value is deliberate. Both explicit and
+silent acceptance close the claim, both trigger Notice of Closure, both
+have the same legal effect — operationally they are the same outcome.
+Treating them as different enum values would force every downstream
+surface (Server Actions, UI filters, queue queries, reporting) to
+explicitly handle two states that are operationally identical. The
+boolean captures the audit-trail-defensibility distinction (which
+matters for "did the customer affirmatively accept or did they go
+silent") without committing the rest of the system to a structural
+distinction.
+
+### The three-day window: a new clock event type
+
+The three-day customer review window is a future-firing deadline. The
+canonical mechanism is the Clock Event Infrastructure from Decision 9 —
+clock_events, pg_cron-driven hourly. This section adds a new event type
+to the enum, leveraging the extensibility property the Tier 1 section
+locked. The Phase 1 event types from the Clock Event Infrastructure
+section (registration_prep_pre_trigger, info_request_due,
+warranty_expiry_warning, trigger_confirmation_overdue) are now joined
+by a fifth:
+
+- service_report_response_due — fires when the three-day customer review
+  window expires. The dispatcher checks the service_reports row: if
+  customer_decision is still null at firing time, the row is updated
+  with customer_decision = 'accepted' AND accepted_by_acquiescence =
+  true AND customer_decided_at = the firing moment, then the claim
+  closure flow is initiated. If customer_decision is non-null (the
+  customer already accepted explicitly or disputed), the event has no
+  effect — a synchronous customer action resolved the window before
+  the deadline.
+
+The event is inserted into clock_events at the moment the customer
+notification is sent (when the reviewer accepts the report and the
+customer link is issued). entity_type = 'service_report', entity_id =
+the report's id, fires_at = now() + interval '3 days'. The payload
+JSONB carries the report id and any context the dispatcher needs.
+
+The three-day window is the minimum from SOP 1 ("a minimum of three
+days"). Whether tenants can configure the window length per their own
+contractual norms — and where that configuration lives (tenants.settings
+with a service_report_response_days key, parallel to the existing
+ala_markup_percent and rich_text_max_chars settings) — is a Phase 3
+implementation detail flagged here. The architectural commitment is the
+clock-event-driven mechanism; the window length default and
+configurability are downstream.
+
+### Claim status interactions (deferred to claim lifecycle)
+
+The service report flow drives several claim status transitions:
+
+- On reviewer acceptance: claim moves to a "Resolved" state (SOP 5 and
+  SOP 1 both name this).
+- On customer acceptance (explicit or by acquiescence), or post-dispute
+  resolution: claim moves to a "Closed" state, and a Notice of Closure
+  is sent (SOP 5: "the warrantyOS system closes the claim and
+  subsequently sends a Notice of Closure to the customer").
+
+The Tier 2 Claim Shell deliberately left the claim status enum's specific
+values under-specified at the architectural level (only pre-activation
+and active were locked, with richer states flagged). The Tier 3 claim
+lifecycle section settles the closed set of claim status values and the
+transitions between them, drawing on this section's evidence that
+"Resolved" and "Closed" are meaningful states. The Service Report section
+documents the trigger relationships; it does not lock the claim status
+enum values.
+
+### Custom Field System: not in Phase 1 scope
+
+service_report is not in Decision 3's Phase 1 custom-field entity scope
+(projects, warranty_registrations, claims). Whether the pattern of
+tenant-configurable variation surfaces for service reports — and whether
+Decision 3 needs revision to add service_report as a fourth entity_type
+— is a downstream architectural question. The SOP's seven content items
+are universal across warrantors and do not surface a tenant-configurable
+need; if one surfaces operationally, Decision 3 gets revised and this
+section gets a follow-up. The architecture as of this section commits to
+the universal hard-column + JSONB shape only.
+
+### Outstanding architectural questions
+
+Flagged for downstream / Phase 3 implementation:
+
+- parts_used shape: JSONB array (as drafted) or a child table
+  (service_report_parts). Cost-tracking joins on parts may pull this
+  toward a child table; the per-report query pattern alone is fine with
+  JSONB. Same flag as supporting_documents on Claim Intake.
+- photos shape: JSONB array (as drafted) or a child table
+  (service_report_photos). Attachments-style querying and downstream
+  asset management may pull this toward a child table. Same flag.
+- Submitter's tokenized link storage: whether the link's token lives on
+  the service_reports row directly or in a separate
+  service_report_submission_tokens table is a Phase 3 implementation
+  detail, parallel to the customer review token shape and to the claim
+  intake token shape from Claim Intake's outstanding questions. The
+  pattern's "shape to copy, not shared store" rule applies either way.
+- Customer review window length configurability: whether tenants can
+  configure the three-day default, and where the configuration lives.
+  Default is locked at three days per SOP 1; configurability is
+  downstream.
+- service_report_response_due dispatcher payload shape: each clock event
+  type has an expected payload schema validated at insert time. The
+  shape for this new event type is a Phase 3 implementation detail.
+- Multiple reports per claim: the UNIQUE constraint on claim_id locks
+  one-to-one as the architectural commitment. If operational reality
+  surfaces a need for multiple reports per claim (multiple repair
+  attempts each generating their own report), the constraint relaxes.
+  Flagged for downstream verification.
+
+### What is NOT in the service report
+
+Parallel to the deliberate-omissions lists elsewhere:
+
+- No subcontractor company columns. The subcontractor's identity is
+  reachable through submitted_by_contact_id's FK to contacts, and that
+  contact's tenant-directory record carries the company information.
+  Duplicating it on the report would create a sync surface.
+- No work plan FK. The relationship between service reports and work
+  plans is one-to-one through the claim — a claim has one work plan
+  and one service report. The work plan can be reached through the
+  claim_id; an explicit work_plan_id FK adds no information.
+- No closure notice fields. The Notice of Closure is a customer-facing
+  communication, generated from the closed claim's state. Notice
+  generation is a separate concern (the v1 Customer-Facing
+  Communications inventory); the service report carries the data that
+  drives the notice, not the notice itself.
+- No reviewer authority columns. Whether a warranty professional has
+  the authority to accept or reject a specific report is a role-based
+  permission check at the Server Action layer (the reviewer is a tenant
+  user with role = 'reviewer' or 'team_admin'), not a column on this
+  table.
