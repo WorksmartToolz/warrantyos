@@ -2187,6 +2187,23 @@ claim_intake_tokens table is a Phase 3 implementation detail, parallel to
 the other implementation flags in this section. The architectural commitment
 is that the pattern applies and the token has its own storage.
 
+When a tenant has configured an Acknowledgment Gate template for
+gate_purpose = 'claim_submission' (per Decision 12's Acknowledgment
+Gate Pattern, documented as its own Tier 1 section), the customer
+encounters that gate as the first screen of the tokenized link before
+reaching the intake form. The canonical example is a Warranty Claim
+Submission Requirements gate where the tenant lists evidence
+expectations, submission standards, or operational language the
+customer must acknowledge before filing. The customer reads the gate
+content, checks the acknowledgment box, and (if the gate template
+requires) types their name; only then does the Server Action render
+the intake form. The gate is optional per tenant — tenants without a
+configured gate for gate_purpose = 'claim_submission' see customers
+proceed directly to the intake form. The Acknowledgment Gate Pattern
+section documents the mechanism, schema, optional-per-tenant framing,
+and the polymorphic protected-entity reference (authorized_entity_type
+= 'claim', authorized_entity_id = the resulting claim row's id).
+
 ### Outstanding architectural questions
 
 The workbooks surfaced architectural questions that this section does not
