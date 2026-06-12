@@ -3514,3 +3514,602 @@ Parallel to the deliberate-omissions lists elsewhere:
   entities. The Custom Field System is for fields that vary by tenant on
   the entities themselves, not for legal/safety language attached to
   interaction surfaces.
+
+## Customer Work Authorization
+
+**Status: Designed at the architectural level.** Decision 11 (Phase 3
+decisions log) is the locked architectural specification for this entity,
+including the three-table parent-child-revisions shape, the seven-value
+status state machine, the five locked commitments, and the cross-entity
+dependencies. Decision 12 (Acknowledgment Gate Pattern, Tier 1) is the
+locked source for the gate cross-reference noted below. The three tables
+(work_authorization_templates, work_authorization_documents,
+work_authorization_revisions) are Phase 3 tables to be migrated. One open
+architectural question — the polymorphic event_reference_id FK shape
+(11b) — is deferred to Phase 3 implementation and flagged below. The
+operational state machine specifics (which Server Actions transition
+which status values under which conditions, the precise authority model
+for who can revise versus withdraw) belong to downstream operational
+drafting; this section locks the architecture, not the workflow.
+
+A Customer Work Authorization is the document a warrantor sends to a
+customer to obtain explicit approval before warranty personnel — or
+contracted third parties under the warrantor's coordination — perform any
+on-site activity at the customer's site. SOP 1's framing names this in
+the inspection context: "the warranty professional must request a
+customer Work Authorization before the joint/exploratory inspection can
+commence." The platform's commitment is broader. Every event requiring
+physical presence at the customer's site — inspections, repair work,
+follow-up site visits, anything else operationally analogous — is gated
+by an approved Work Authorization specific to that event. The
+architecture intentionally extends beyond SOP 1's literal language to
+capture the universal pattern.
+
+### Schemas
+
+Three tables. The template holds tenant-defined reusable configuration;
+the document captures one specific authorization event with frozen
+template snapshot and the customer's response; the revisions child table
+captures the full history of warrantor edits to a single document.
+
+    work_authorization_templates
+      id                          uuid PK
+      tenant_id                   uuid NOT NULL FK -> tenants
+      name                        text NOT NULL
+      warrantor_field_config      jsonb NOT NULL
+                                  -- the configuration of warrantor-
+                                  -- completed fields shown to the
+                                  -- customer as read-only context
+                                  -- (requestor info, planned dates,
+                                  -- crew size, SOW activity)
+      customer_field_config       jsonb NOT NULL
+                                  -- the configuration of customer-
+                                  -- entered fields (O&M contact info,
+                                  -- site access, gate codes, special
+                                  -- access requirements)
+      legal_language              jsonb NOT NULL
+                                  -- ProseMirror-compatible JSON; the
+                                  -- tenant-defined legal/operational
+                                  -- language that accompanies the form
+      is_default                  boolean NOT NULL DEFAULT false
+                                  -- at most one default per tenant
+      deleted_at                  timestamptz nullable
+                                  -- soft-delete required; retired
+                                  -- templates must remain queryable
+                                  -- for documents generated from them
+      created_at                  timestamptz NOT NULL DEFAULT now()
+      updated_at                  timestamptz NOT NULL DEFAULT now()
+
+    work_authorization_documents
+      id                          uuid PK
+      tenant_id                   uuid NOT NULL FK -> tenants
+                                  -- denormalized per Standard RLS
+      claim_id                    uuid NOT NULL FK -> claims
+                                  -- NO UNIQUE constraint;
+                                  -- one-to-many with claim
+      template_id                 uuid NOT NULL FK ->
+                                    work_authorization_templates
+      template_snapshot           jsonb NOT NULL
+                                  -- template content captured at
+                                  -- document generation time, frozen
+      event_type                  text NOT NULL
+                                  -- 'inspection' | 'repair_work' |
+                                  --   'site_visit' | future types
+                                  -- CHECK constraint enforces values;
+                                  -- identifies what on-site activity
+                                  -- this authorizes
+      event_reference_id          uuid nullable
+                                  -- FK to the specific event entity
+                                  -- (inspections.id when event_type =
+                                  -- 'inspection', etc.); shape resolved
+                                  -- at implementation time per
+                                  -- event_type (see open question 11b)
+      status                      text NOT NULL DEFAULT 'draft'
+                                  -- 'draft' | 'sent' | 'approved' |
+                                  --   'denied' | 'revised' | 'resent' |
+                                  --   'withdrawn'
+                                  -- CHECK constraint enforces values
+      expected_response_date      date nullable
+                                  -- warrantor-set date by which
+                                  -- customer response is expected;
+                                  -- drives reminder event firing
+      requestor_name              text NOT NULL
+      requestor_company           text NOT NULL
+      requestor_phone             text nullable
+      requestor_email             text NOT NULL
+      planned_start_at            timestamptz NOT NULL
+      planned_end_at              timestamptz NOT NULL
+      crew_size                   integer NOT NULL
+      sow_activities              jsonb NOT NULL
+                                  -- ProseMirror-compatible JSON;
+                                  -- the planned Scope of Work
+      om_provider_company         text nullable
+      om_contact_name             text nullable
+      om_contact_phone            text nullable
+      om_contact_email            text nullable
+      site_emergency_address      jsonb nullable
+                                  -- structured address; shape
+                                  -- consistent with project's
+                                  -- site_address pattern
+      site_accessibility_date     date nullable
+      operating_hours             text nullable
+      special_access_required     boolean nullable
+      special_access_details      jsonb nullable
+                                  -- ProseMirror-compatible JSON;
+                                  -- conditional on
+                                  -- special_access_required = true
+      gate_code_needed            boolean nullable
+      gate_code_details           jsonb nullable
+                                  -- conditional on gate_code_needed
+                                  -- = true
+      customer_comments           jsonb nullable
+                                  -- optional response, ProseMirror-
+                                  -- compatible JSON; safety
+                                  -- orientations, check-in/check-out,
+                                  -- observations
+      customer_decision           text nullable
+                                  -- 'approved' | 'denied'
+                                  -- nullable until customer responds
+      denial_explanation          jsonb nullable
+                                  -- ProseMirror-compatible JSON;
+                                  -- required when customer_decision
+                                  -- = 'denied' (enforced app-layer)
+      signer_name_typed           text nullable
+                                  -- the customer's typed-name signature
+      authorization_acknowledged  boolean nullable
+                                  -- the "I authorize" checkbox; must
+                                  -- be true for an approval submission
+      request_completed_by_name   text nullable
+                                  -- the customer's representative name
+      customer_token              text nullable
+                                  -- single-use token for the tokenized
+                                  -- access link; null after consumption
+      customer_token_expires_at   timestamptz nullable
+      requested_at                timestamptz NOT NULL DEFAULT now()
+                                  -- when warrantor created and sent
+                                  -- the request
+      responded_at                timestamptz nullable
+                                  -- when customer submitted response
+      created_at                  timestamptz NOT NULL DEFAULT now()
+      updated_at                  timestamptz NOT NULL DEFAULT now()
+      -- CHECK / app-layer invariant: tenant_id matches the referenced
+      -- claim's tenant_id
+
+    work_authorization_revisions
+      id                              uuid PK
+      tenant_id                       uuid NOT NULL FK -> tenants
+      work_authorization_document_id  uuid NOT NULL FK ->
+                                        work_authorization_documents
+      revised_by_user_id              uuid NOT NULL FK ->
+                                        public.users(id)
+                                      -- the warrantor user who made
+                                      -- the revision
+      revision_reason                 jsonb NOT NULL
+                                      -- ProseMirror-compatible JSON;
+                                      -- typically captures the denial
+                                      -- reason that triggered this
+                                      -- revision
+      field_changes                   jsonb NOT NULL
+                                      -- structured record of what
+                                      -- fields changed (before/after
+                                      -- pairs); shape is a Phase 3
+                                      -- implementation detail
+      revised_at                      timestamptz NOT NULL DEFAULT now()
+
+All three tables follow the Standard RLS Pattern's six steps: tenant_id
+FK, RLS enabled, the standard tenant-scoped SELECT policy,
+service-role-only writes, the required grants. tenant_id is denormalized
+onto all three directly per the convention. The application-layer
+invariant that revisions.tenant_id matches the parent document's
+tenant_id is parallel to other denormalization invariants in v2.
+
+### Event-specific: one-to-many with claims
+
+A claim has zero, one, or many Customer Work Authorizations across its
+lifecycle. There is no UNIQUE constraint on claim_id. Each Work
+Authorization authorizes one specific on-site event — an inspection at
+one date and time, a repair-work execution at another, a follow-up site
+visit later — and each event needs its own authorization. A claim with
+an inspection followed by repair work followed by a follow-up visit has
+three Work Authorization documents, one per event.
+
+This is the architectural shape that distinguishes Customer Work
+Authorization from ALA System and Service Report Submission. ALA's
+relationship to claims is one-to-one (UNIQUE on claim_id): a claim that
+needs an Indistinct ALA has exactly one. Service Report's relationship
+is one-to-one (UNIQUE on claim_id): a claim has one service report
+documenting the completed repair work. Work Authorization's
+relationship is one-to-many because each authorization grants the
+warrantor permission for one specific bounded event, not for the claim
+as a whole. The same claim can have multiple events authorized
+separately; each authorization is bounded by its event_type and
+event_reference_id.
+
+The contrast is operationally important. A reader looking at "why does
+ALA UNIQUE-on-claim, why does Work Authorization not" finds the answer
+in scope: ALA authorizes financial liability for the claim's
+investigation, which happens once per Indistinct outcome per claim;
+Work Authorization authorizes physical site presence for a bounded
+event, which can recur multiple times per claim across its lifecycle.
+
+### Universal blocking-gate behavior
+
+The architectural commitment: no on-site activity of any kind — anyone
+in the warrantor's coordination chain physically arriving at the
+customer's site — proceeds without an approved Work Authorization for
+that specific event. The Server Action layer enforces this as a
+precondition check before any operation that creates on-site presence.
+
+This is broader than SOP 1's literal language. SOP 1 names inspections
+specifically (the warranty professional must request a customer Work
+Authorization before the joint/exploratory inspection can commence).
+The platform extends the gate to all on-site activity intentionally,
+because the operational pattern — get explicit customer approval before
+showing up — applies whether the on-site purpose is investigation,
+repair, follow-up, or anything else. SOP 1 captured the canonical case;
+the architecture commits to the pattern.
+
+A reader looking at the audit-vs-decision relationship: SOP 1's
+inspection-specific framing is preserved as an instance, not as the
+limit. The platform supports broader gating, and tenants whose
+operational practice already gates all site presence find the
+architecture natively supports them.
+
+### Template-vs-document parallel to ALA
+
+The two-table shape — work_authorization_templates as tenant-defined
+reusable configuration, work_authorization_documents as per-event
+instantiations with frozen template_snapshot — mirrors ALA System's
+templates-and-documents pattern.
+
+Templates are tenant-defined. A tenant has one or more templates with
+different warrantor and customer field configurations and different
+legal language. A tenant with one operational style has one template,
+defaulted. A tenant with multiple operational variants (different
+templates for different on-site event types, different jurisdictions,
+different SOW formalities) has multiple templates with one defaulted
+per the is_default boolean.
+
+Soft-delete on templates is required for the same reason as ALA's: a
+template retired today may have generated documents last year, and
+those documents' template_snapshot must remain readable while
+template_id still resolves for reporting purposes. Hard-deleting a
+template would break the relationship; the convention follows the same
+shape as ALA, Custom Field System definitions, and Acknowledgment Gate
+Pattern templates.
+
+The frozen template_snapshot on the document is the same defensibility
+mechanism as everywhere else: the customer agreed to exactly the
+content captured at the moment they responded, not whatever the
+template says today.
+
+### Warrantor-completed fields
+
+The warranty team fills the warrantor-side fields when creating the
+document. These are direct text columns on the document, not FK +
+Snapshot to contacts:
+
+- requestor_name, requestor_company, requestor_phone, requestor_email
+  identify the warranty professional or warrantor representative who
+  is requesting the authorization. Direct field capture rather than
+  FK + Snapshot to a tenant user reflects that this is a captured
+  identity for the customer's reference, not a relationship the
+  platform tracks for reporting reuse.
+- planned_start_at, planned_end_at bracket the event window the
+  warrantor intends to be on-site.
+- crew_size is the number of personnel the warrantor plans to have
+  on-site.
+- sow_activities is the planned Scope of Work in ProseMirror-compatible
+  JSON — what the warrantor intends to do during the on-site event.
+
+This is "warrantor-completed" because the warranty team enters these
+fields when constructing the request, before the customer sees the
+document. They appear to the customer as read-only context.
+
+### Customer-entered fields
+
+The customer fills the customer-side fields when responding to the
+document. These capture the operational information the warrantor needs
+to coordinate the on-site event safely:
+
+- om_provider_company, om_contact_name, om_contact_phone,
+  om_contact_email identify the O&M provider or facility contact who
+  will be on-site during the event (or reachable if needed).
+- site_emergency_address holds a structured address for emergency
+  reference, parallel to projects.site_address.
+- site_accessibility_date, operating_hours, special_access_required
+  (with conditional special_access_details), gate_code_needed (with
+  conditional gate_code_details) capture practical access information.
+- customer_comments holds optional notes from the customer — safety
+  orientations, check-in/check-out procedures, observations about the
+  site relevant to the planned event.
+
+The customer_field_config on the template determines which of these
+fields are required, which are optional, and any tenant-specific
+labeling or instructions. The customer's response submission must
+satisfy the template's required-field set.
+
+### Tokenized form-acceptance with signature artifact
+
+The Customer Work Authorization is the fifth canonical use of the
+Stateless Tokenized Interaction Pattern, after claim intake,
+registration assignee submission, supply-only delivery reporting, and
+service report customer review. The customer receives a tokenized email
+link to the authorization form, opens it, completes the customer-side
+fields, and submits with approval or denial.
+
+The signature artifact — captured on approval — is two columns:
+
+- signer_name_typed: the customer's representative types their name
+- authorization_acknowledged: an "I authorize" checkbox, must be true
+  for an approval submission
+
+The two-column signature artifact constitutes legal approval for the
+on-site event. Form submission with both columns populated (signer
+name + acknowledgment checkbox = true) plus customer_decision =
+'approved' is the platform's record of authorization. The customer's
+identity capture, the timestamp on responded_at, and the audit trail
+through tokenized link consumption together preserve the
+authorization's defensibility.
+
+This signature mechanism is locked for Work Authorization specifically.
+The ALA signature mechanism — flagged as an open architectural question
+in the ALA System section — is held as a separate question because
+ALA's assumption of financial liability may warrant a different
+signature mechanism (e.g., e-signature service integration, wet
+signature). Work Authorization's typed-name-plus-checkbox is locked for
+this entity and does not pre-decide ALA's.
+
+The customer_token and customer_token_expires_at columns store the
+tokenized link per the Stateless Tokenized Interaction Pattern's
+"shape to copy, not shared store" rule: each authorization's token
+lives on its own document row rather than in the invitations table.
+
+### State machine on status
+
+The status column transitions through seven values enforcing the
+operational lifecycle:
+
+- draft — warrantor has created the document but has not yet sent it
+  to the customer. The customer cannot see a draft. Editable freely
+  by the warrantor.
+- sent — warrantor has sent the document to the customer (the
+  tokenized link has been emailed). Awaiting customer response.
+- approved — customer responded with customer_decision = 'approved'
+  and submitted the signature artifact (signer_name_typed populated,
+  authorization_acknowledged = true). This is the terminal state for
+  the happy path; downstream on-site activity is authorized.
+- denied — customer responded with customer_decision = 'denied' and
+  populated denial_explanation. Triggers the revise-and-resend path
+  (see below) or, as fallback, the withdrawal path.
+- revised — warrantor has edited the denied document. The document is
+  back to draft-like state pending resend.
+- resent — warrantor has re-sent the revised document. The customer
+  sees the full revision history transparently and decides again.
+- withdrawn — warrantor has scrapped the request entirely (fallback
+  for denials that aren't recoverable through revision). The
+  authorization is permanently abandoned; the warrantor would issue a
+  new document if they want to try again.
+
+Transitions are governed by Server Actions, not by direct UPDATE on
+the column. The specific authority rules — which roles can move which
+documents through which transitions — are operational concerns
+deferred to downstream drafting. The architectural commitment is the
+seven values and the directed transitions among them.
+
+### Revise-and-resend mechanic
+
+The primary recovery path for a denied authorization is revise-and-
+resend, not withdraw-and-recreate. When a customer denies a document,
+the warrantor reviews the denial_explanation, edits the document's
+fields (planned dates, scope of work, crew size, whatever the customer
+objected to), and resubmits. The document's id, claim_id, and
+event_reference_id stay the same — the same authorization request
+evolves through one or more revisions until the customer approves (or
+the warrantor withdraws as fallback).
+
+The work_authorization_revisions child table captures each revision:
+
+- revised_by_user_id identifies the warrantor user who made the
+  revision.
+- revision_reason captures why the revision happened, typically the
+  customer's denial_explanation text or a paraphrase of it.
+- field_changes records what fields changed and what their before/
+  after values were. The shape of this JSONB record (structured diff,
+  flat key-value map of changed fields, full-document snapshot before
+  and after) is a Phase 3 implementation detail flagged below.
+- revised_at is the timestamp.
+
+The customer sees the full revision history transparently on resend.
+A document on its third revision shows the customer all three prior
+states and the warrantor's reasoning for each revision. This was
+Option A from the Decision 11 resolution discussion — full
+transparency for trust-building, operational clarity, and
+audit-defensibility. The alternative (showing only the current
+revision and burying the history) was rejected.
+
+Withdrawal-and-new-document is the fallback for the edge case where
+a denial isn't recoverable through revision (e.g., the customer's
+denial reflects a fundamental scope rethink and the warrantor decides
+to start over entirely). A withdrawn document is permanently
+abandoned; the warrantor creates a new document with a new id if they
+want to try again.
+
+### Acknowledgment Gate Pattern cross-reference
+
+Work Authorization uses the Acknowledgment Gate Pattern (Decision 12,
+documented as its own Tier 1 section) via gate_purpose =
+'work_authorization'. When a tenant has configured an acknowledgment
+gate template for this purpose — the canonical example is a Site
+Readiness and Safety Requirements gate — the customer encounters that
+gate as the first screen of the tokenized link before reaching the
+Work Authorization form. The customer must read the gate content, check
+the acknowledgment box, and (if the gate template requires) type their
+name. Only then does the Server Action render the actual Work
+Authorization form.
+
+The gate is per-tenant per-purpose optional. A tenant without a
+configured gate for gate_purpose = 'work_authorization' sees customers
+proceed directly to the Work Authorization form without a gate. The
+Acknowledgment Gate Pattern section documents the mechanism, the
+schema, the optional-per-tenant framing, and the polymorphic protected-
+entity reference (authorized_entity_type = 'work_authorization_document',
+authorized_entity_id = the document's id).
+
+### Clock event reminder mechanism
+
+The work_authorization_response_overdue clock event type fires when a
+sent or resent document's expected_response_date passes with
+customer_decision still null. This is the sixth event type added to
+Decision 9's enum, after registration_prep_pre_trigger,
+info_request_due, warranty_expiry_warning, trigger_confirmation_overdue,
+and service_report_response_due (the latter added by Service Report
+Submission).
+
+When the warrantor sends or resends the document, the Server Action
+inserts a clock_events row with event_type =
+'work_authorization_response_overdue', entity_type =
+'work_authorization_document', entity_id = the document's id, and
+fires_at = the document's expected_response_date. When the event
+fires, the dispatcher checks customer_decision: if still null, it
+sends a reminder notification to the customer's tokenized link
+contact email. If non-null (the customer already responded), the
+event has no effect — a synchronous customer action resolved the
+overdue window before firing.
+
+The reminder cadence (one reminder, multiple reminders, escalating
+cadence) is a Phase 3 implementation detail. The architectural
+commitment is the event-fires-on-expected-date mechanism through
+Decision 9's infrastructure.
+
+### Cross-entity dependencies
+
+Real cross-entity dependencies, deferred or resolved:
+
+- Claims (FK parent). ON DELETE behavior on claim_id is a Phase 3
+  implementation detail parallel to other claim-child FK flags. The
+  architectural commitment is that Work Authorization documents are
+  always child entities of a claim.
+- Inspections (event reference). When event_type = 'inspection', the
+  event_reference_id points to the inspections row. Work
+  Authorization with customer_decision = 'approved' is required
+  before the inspection's status can advance from 'requested' to
+  'scheduled'. This resolves the cross-entity dependency the
+  Inspections Foundation section flagged operationally ("Customer
+  Work Authorization before a site inspection commences"); the
+  resolution is here, locked at the architectural layer.
+- Work Plan Workflow (event reference). When event_type =
+  'repair_work', the event_reference_id points to the work plan
+  entity. Work Authorization with customer_decision = 'approved' is
+  required before work plan execution can commence. The Work Plan
+  Workflow section is drafted later; the cross-entity flag is
+  documented in advance here.
+- Clock Event Infrastructure. The work_authorization_response_overdue
+  event type fires reminders per the mechanism above.
+- Custom Field System (Decision 3). Work Authorization is NOT in
+  Phase 1 custom-field entity scope. Tenant-configurable variation
+  in field labels, requiredness, and content is handled through the
+  template's warrantor_field_config and customer_field_config JSONB
+  rather than through custom_field_definitions on Work Authorization
+  as an entity. If operational pressure surfaces a need for custom
+  fields on Work Authorization specifically, Decision 3's three-entity
+  scope (projects, warranty_registrations, claims) gets revisited;
+  for now, the template's JSONB configuration is the mechanism.
+- ALA System. ALA blocking-gate behavior and Work Authorization
+  blocking-gate behavior are locked as separate but parallel
+  mechanisms. ALA gates investigation (whether the warranty
+  determination can proceed); Work Authorization gates on-site
+  presence. The two operate independently and can both apply to the
+  same claim — an Indistinct claim requiring on-site investigation
+  needs both an approved ALA (financial liability accepted) and an
+  approved Work Authorization (site presence approved).
+- Acknowledgment Gate Pattern (Decision 12). gate_purpose =
+  'work_authorization' covers the Site Readiness and Safety
+  Requirements gate (or equivalent) configurable by tenants.
+
+### Outstanding architectural questions
+
+Flagged for downstream / Phase 3 implementation:
+
+- Polymorphic event_reference_id FK shape (Decision 11.b). The
+  event_reference_id column references different target tables per
+  event_type (inspections.id when event_type = 'inspection', the
+  work plan entity's id when 'repair_work', future types' rows for
+  future event_type values). Whether this is implemented as a single
+  nullable column with application-layer dispatch by event_type,
+  separate event-type-specific FK columns (e.g., inspection_id,
+  work_plan_id, with a CHECK enforcing alignment with event_type),
+  or a junction table is a Phase 3 implementation detail. Decision
+  11 locks the two-column shape (event_type + event_reference_id);
+  the mechanics are downstream. Same restraint as the polymorphic
+  FK question in the Acknowledgment Gate Pattern section.
+- ON DELETE behavior on claim_id. Parallel to other claim-child FK
+  flags across v2; the architectural restraint suggests RESTRICT
+  with soft-delete as the cleanup path, but the specific clause is
+  Phase 3.
+- ON DELETE behavior on template_id. Soft-delete on templates means
+  hard-deletion isn't an ordinary path, but the FK clause itself is
+  Phase 3.
+- ON DELETE behavior on event_reference_id. Without a database-
+  enforced FK (per the polymorphic shape question), this becomes an
+  application-layer integrity concern. The application must check
+  for active Work Authorizations before allowing the referenced
+  event entity to be deleted. The mechanics are Phase 3.
+- is_default enforcement on templates. Partial UNIQUE index on
+  (tenant_id) where is_default = true vs application-layer
+  invariant, parallel to ALA's and Acknowledgment Gate's is_default
+  flags.
+- field_changes JSONB shape on revisions. Structured diff, flat
+  key-value map, full-document before/after snapshot, or another
+  shape is a Phase 3 implementation detail.
+- Reminder cadence configuration. Whether the
+  work_authorization_response_overdue event fires once or multiple
+  times, and where the cadence configuration lives
+  (tenants.settings, template configuration, hardcoded default), is
+  a Phase 3 implementation detail.
+- Authority rules for status transitions. Which roles can move
+  documents through which transitions (e.g., can any Reviewer
+  withdraw, or only Team Admin; can a different reviewer revise a
+  document originally created by another reviewer) are operational
+  authorization concerns, not schema-level.
+
+### What is NOT in customer work authorization
+
+Parallel to the deliberate-omissions lists elsewhere:
+
+- No customer FK to the Unified Contacts Directory. The customer-
+  facing identity capture is the typed signature (signer_name_typed)
+  plus the customer's representative name (request_completed_by_name)
+  as direct text fields, not as FK + Snapshot to a contacts row. The
+  customer in this context is the entity associated with the claim's
+  parent project, reachable through warranty_registration_id ->
+  projects.customer_id; the Work Authorization document captures the
+  on-site representative who responds, which is often different from
+  the project's customer-of-record and varies per event.
+- No O&M provider FK. The O&M provider information captured in
+  om_provider_company through om_contact_email is direct field
+  capture in Decision 11's locked schema, not FK + Snapshot to a
+  contacts row. This parallels how Claim Intake captures O&M Provider
+  information (also direct field capture in its current state).
+  Whether either section should resolve toward FK + Snapshot remains
+  an open architectural question on the Claim Intake side; Work
+  Authorization's current shape reflects Decision 11's specification,
+  and any future revision toward FK + Snapshot would warrant its own
+  architectural decision rather than tracking another section's
+  resolution implicitly.
+- No work plan FK separate from event_reference_id. When event_type
+  = 'repair_work', event_reference_id IS the work plan FK. Adding a
+  separate work_plan_id would duplicate the relationship.
+- No multi-event-per-document. A single Work Authorization document
+  covers exactly one event (one event_type + one event_reference_id
+  pair). A claim with multiple events has multiple documents. The
+  one-document-per-event architectural choice is what makes
+  one-to-many with claims operationally clean.
+- No custom field involvement at the entity level. Tenant-
+  configurable variation lives in the template's
+  warrantor_field_config and customer_field_config JSONB, not
+  through Decision 3's custom_field_definitions mechanism.
+- No second token for the Acknowledgment Gate. The gate is an
+  interstitial on the existing tokenized link (customer_token
+  above), not a separate tokenized interaction. The Acknowledgment
+  Gate Pattern section documents this mechanism.
