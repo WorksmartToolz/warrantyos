@@ -548,11 +548,690 @@ Work Authorization cross-references it.
 
 ---
 
+---
+
+## Decision 13: Work Plan Execution Path and Internal Team Capture
+
+**Decided in Session 5f (Phase 3 Tier 3 Work Plan Workflow pre-triage).**
+
+### Context
+
+Pre-triage of source materials for the Work Plan Workflow section
+(SOP 6 Key Components of a Work Plan, SOP 1 Accepted Warranty Claim
+Lifecycle, Work Plan Data Inputs workbook, v1 anchor architecture's
+Four Work Plan Execution Paths) surfaced a reconciliation question
+between the workbook's three-value Service Type dropdown and v1's
+four execution paths.
+
+### Question
+
+The Work Plan Data Inputs workbook has a Service Type dropdown with
+three values: Internal–Warranty FOS, Internal–Construction Support,
+Ext. Subcontractor. v1 anchor architecture has Four Work Plan
+Execution Paths: Path 1 (Warrantor Self-Performs), Path 2A
+(Scope-Owned Subcontractor), Path 2B (Outsourced Subcontractor), and
+Path 3 (Customer Self-Services). These taxonomies do not map cleanly.
+
+What is the locked enum shape for capturing execution path and
+internal team assignment?
+
+### Resolution
+
+**Five locked commitments:**
+
+**13.1: Two-column shape for execution path and internal team capture.**
+
+- `work_plans.execution_path` — platform-locked enum capturing v1's
+  four paths
+- `work_plans.internal_team_id` — FK nullable, only populated when
+  execution_path = 'warrantor_self_performs'
+
+**13.2: execution_path enum values (locked, platform-level):**
+
+- `warrantor_self_performs` — internal team executes the repair
+- `scope_owned_subcontractor` — original installer with active
+  warranty obligation executes the repair (v1's Path 2A)
+- `outsourced_subcontractor` — third party procured via RFQ executes
+  the repair (v1's Path 2B)
+- `customer_self_services` — customer executes the repair with
+  warrantor reimbursement (v1's Path 3)
+
+Maps to v1's Four Work Plan Execution Paths verbatim. CHECK
+constraint enforces values; extensible via migration if a fifth
+execution path surfaces operationally.
+
+**13.3: New `internal_teams` table — tenant-defined internal team
+registry.**
+
+The workbook's distinction between "Internal–Warranty FOS" and
+"Internal–Construction Support" reflects a tenant-specific
+organizational reality (primary internal team vs fallback internal
+team when external resources aren't viable or scope exceeds primary
+team capacity). The team labels themselves are tenant-specific
+(Terrasmart uses Warranty FOS and Construction Support; other
+warrantors define their own naming).
+
+The platform commits to supporting the operational pattern (each
+tenant may define multiple internal teams used for warranty work)
+without enshrining specific team labels. The `internal_teams` table
+is the tenant-configurable registry.
+
+**13.4: Architectural commitment to the operational structure, not
+the labels.**
+
+The two-team or n-team operational pattern (primary internal team,
+one or more fallback internal teams) is universal across warrantors
+industry-wide. The team labels (e.g., Terrasmart's "Warranty FOS"
+and "Construction Support") are NOT platform-locked enum values.
+Each warrantor defines their own team labels through the
+internal_teams table.
+
+**13.5: No is_primary boolean on internal_teams.**
+
+A primary-vs-fallback distinction is not architecturally tracked at
+the team level. UI default-selection behavior (pre-selecting a
+warrantor's preferred default team when creating a work_plan) can
+live in tenants.settings if needed. Cost-per-team queries answer
+through the future Cost Tracking section joining work_plans to
+internal_teams via internal_team_id. Verified via chat 4 scan: no
+existing v2 content depends on a primary-vs-fallback team
+distinction.
+
+### Schema sketch
+
+```
+internal_teams
+  id              uuid PK
+  tenant_id       uuid NOT NULL FK -> tenants
+                  -- denormalized per Standard RLS Pattern
+  name            text NOT NULL
+                  -- tenant's own label (e.g., "Warranty FOS",
+                  -- "Construction Support", "Tier 1 Service",
+                  -- whatever fits the warrantor's organizational
+                  -- structure)
+  description     text nullable
+                  -- optional explanatory note
+  deleted_at      timestamptz nullable
+                  -- soft-delete required; historical work_plans
+                  -- retain internal_team_id FK even when teams
+                  -- are retired
+  created_at      timestamptz NOT NULL DEFAULT now()
+  updated_at      timestamptz NOT NULL DEFAULT now()
+```
+
+The work_plans.execution_path and work_plans.internal_team_id
+columns are detailed in Decision 15's Work Plan schema sketch.
+
+### Cross-entity dependencies
+
+- **work_plans (FK from work_plans.internal_team_id):** the internal
+  team is referenced by a Work Plan when its execution_path =
+  'warrantor_self_performs'. CHECK / app-layer invariant:
+  internal_team_id is non-null when execution_path =
+  'warrantor_self_performs', null otherwise.
+- **Future Cost Tracking section:** cost-per-internal-team and
+  cost-per-execution-path queries answer by joining cost-tracking
+  records to work_plans and reading these two columns. The Cost
+  Tracking section, when drafted, must ensure its schema supports
+  these joins.
+
+### Open architectural questions deferred
+
+- **ON DELETE behavior on internal_team_id.** Soft-delete on
+  internal_teams means hard-deletion isn't an ordinary path; the FK
+  clause is Phase 3 implementation detail.
+- **Internal team membership tracking.** Whether internal_teams
+  should reference contacts or tenant users for team-membership
+  tracking (which warrantor user is on which team) is a separate
+  question not in Decision 13's scope.
+
+### Decision implications for already-committed sections
+
+None. Decision 13 introduces new architecture (the internal_teams
+table and the execution_path / internal_team_id columns on
+work_plans) without modifying any committed v2 section.
+
+---
+
+## Decision 14: Notice of Defect Entity
+
+**Decided in Session 5f (Phase 3 Tier 3 Work Plan Workflow
+pre-triage).**
+
+### Context
+
+SOP 1 (Accepted Warranty Claim Lifecycle) describes the "Notice of
+Defect" as the formal communication from the warranty professional
+to a believed-responsible party (subcontractor or internal team)
+saying "this defect is yours; respond with acceptance/rejection."
+The architecture needed to determine whether Notice of Defect is a
+separate entity, a state on the Work Plan, columns on the claim, or
+something else.
+
+Initial framing assumed Notice of Defect was tightly coupled to
+Work Plan (i.e., Notice of Defect IS the initial state of a Work
+Plan, with acceptance triggering Work Plan finalization and
+rejection triggering a new Work Plan). Andre pushed back: Notice of
+Defect is not necessarily connected to a Work Plan. The claim flow
+includes scenarios where the responsible subcontractor is put on
+notice at claim review time, but no Work Plan is ever created
+because the subcontractor handles remediation independently OR the
+matter is contractually outside warrantor coordination OR claim
+resolution evolves without warrantor-coordinated execution.
+
+Andre's correction: Notice of Defect's purpose is "the party
+believed to be responsible has been officially notified and that is
+a matter of record." It is an audit artifact of official
+notification, separate from any downstream execution work.
+
+Further refinement: acceptance of a Notice of Defect is not
+bulletproof closure. The subcontractor might accept at the notice
+stage, get to site, and shift their position ("not on me, it's the
+other guy"). Architecture must capture the binding response at the
+moment of response without committing to that response as final
+resolution.
+
+### Question
+
+What is the architectural shape of the Notice of Defect, given that
+it is:
+- A claim-level audit artifact, not a Work Plan state
+- Independently created at any point in claim lifecycle (claim review
+  time OR later)
+- Multiple per claim (recipient changes as responsibility picture
+  evolves)
+- A binding accept/reject response capture, but not closure-binding
+- Sent to subcontractors (Path 2A or 2B), internal teams (Path 1),
+  OR other party types (vendors for vendor-supplied component issues,
+  original installers, future types)
+- Decoupled from Work Plan creation downstream (some lead to Work
+  Plans, some don't)
+
+### Resolution
+
+**Ten locked commitments:**
+
+**14.1: Separate entity, claim-child, one-to-many.**
+
+A `notices_of_defect` table. NO UNIQUE constraint on claim_id —
+multiple Notices of Defect per claim are operationally real and
+expected across the claim lifecycle.
+
+**14.2: Recipient via Decision 1's dual-FK + Snapshot Pattern,
+broadened.**
+
+`recipient_contact_id` FK to contacts (any contact_type —
+subcontractor, vendor, original installer, future types) OR
+`recipient_user_id` FK to public.users (internal team assignee).
+CHECK constraint: exactly one non-null.
+
+Recipient identity captured with snapshot columns at notification
+time (name, email, company) for audit-defensibility per the FK +
+Snapshot Pattern.
+
+**14.3: Binding response with three states, historical record
+preserved.**
+
+`response_status` enum: 'pending', 'accepted', 'rejected'. Response
+timestamp captured.
+
+Post-acceptance position changes (recipient accepts then later
+disputes on site or in scope) are NOT captured as revisions to this
+Notice of Defect's response_status. They become NEW events — a new
+Notice of Defect to another party, a claim status transition, an
+escalation event — captured in their respective sections. Historical
+record of the original response is preserved.
+
+**14.4: No FK relationship to Work Plan in either direction.**
+
+The Notice of Defect's architectural responsibility ends at response
+capture. Whether a Work Plan, downstream tracking, dispute, or other
+activity follows from an accepted Notice is operational and
+contract-dependent — not encoded in the schema. notices_of_defect
+has no work_plan_id FK; work_plans has no notice_of_defect_id FK.
+
+If a future analysis needs to ask "which Notice of Defect led to
+this Work Plan", it's an application-layer question answered by
+reading the claim's history, not a schema-enforced relationship.
+
+**14.5: Stateless Tokenized Interaction Pattern's sixth canonical
+use.**
+
+The recipient receives a tokenized email link to respond. Same
+pattern as five prior uses (claim intake, registration assignee
+submission, supply-only delivery reporting, service report customer
+review, Customer Work Authorization). Token storage on the
+notices_of_defect row via recipient_token + recipient_token_expires_at
+columns per the "shape to copy, not shared store" rule.
+
+**14.6: Notice of Defect can be created at any point in claim
+lifecycle.**
+
+Notice of Defect can be sent at claim review time (during initial
+responsibility determination) OR later (after Joint Inspection
+findings, after scope investigation reveals a different responsible
+party, etc.). The architecture does not constrain when
+notices_of_defect rows can be created — operational decision
+governed by Server Action authority rules.
+
+**14.7: expected_response_date is NOT NULL.**
+
+Every Notice of Defect has a warrantor-set response deadline. This
+drives reminder firing through the clock event infrastructure.
+
+**14.8: notification_message field captured.**
+
+Warrantor can include a custom message (ProseMirror-compatible JSON
+per Decision 4) along with the claim summary snapshot.
+Tenant-configurable messaging at the per-Notice level.
+
+**14.9: Seventh clock event type added to Decision 9's enum.**
+
+`notice_of_defect_response_overdue` fires when expected_response_date
+passes with response_status still 'pending'. Decision 9's
+clock_events event_type enum now has seven values:
+
+1. registration_prep_pre_trigger
+2. info_request_due
+3. warranty_expiry_warning
+4. trigger_confirmation_overdue
+5. service_report_response_due
+6. work_authorization_response_overdue
+7. notice_of_defect_response_overdue (added by Decision 14)
+
+**14.10: Phase 1 contact_type enum extension flagged.**
+
+Adding `vendor_contact` and `original_installer_contact` (or
+equivalent) to the Phase 1 contact_type enum is a routine Phase 3
+implementation detail when Notice of Defect functionality is built.
+Not new architecture — extension via migration.
+
+### Schema sketch
+
+```
+notices_of_defect
+  id                            uuid PK
+  tenant_id                     uuid NOT NULL FK -> tenants
+                                -- denormalized per Standard RLS Pattern
+  claim_id                      uuid NOT NULL FK -> claims
+                                -- NO UNIQUE constraint;
+                                -- one-to-many with claim
+  
+  -- Recipient capture (the party put on notice)
+  -- Decision 1's dual-FK + Snapshot Pattern, broadened
+  recipient_contact_id          uuid nullable FK -> contacts
+                                -- when recipient is a subcontractor,
+                                -- vendor, original installer, or
+                                -- other contact_type
+  recipient_user_id             uuid nullable FK -> public.users(id)
+                                -- when recipient is an internal team
+                                -- assignee (warrantor user)
+  recipient_name_snapshot       text NOT NULL
+                                -- frozen at notification time
+  recipient_email_snapshot      text NOT NULL
+  recipient_company_snapshot    text nullable
+                                -- frozen at notification time
+  -- CHECK constraint: exactly one of recipient_contact_id or
+  -- recipient_user_id is non-null
+  
+  -- The notification event
+  notified_at                   timestamptz NOT NULL DEFAULT now()
+                                -- the matter-of-record moment
+  notified_by_user_id           uuid NOT NULL FK -> public.users(id)
+                                -- the warranty professional who sent
+                                -- the notification
+  
+  -- What was sent
+  claim_summary_snapshot        jsonb NOT NULL
+                                -- frozen snapshot of claim information
+                                -- shared with recipient at notification
+                                -- (claim_id, defect description,
+                                -- relevant claim_type_data, etc.)
+  notification_message          jsonb nullable
+                                -- ProseMirror-compatible JSON;
+                                -- warrantor's custom message body
+                                -- accompanying the claim summary
+  
+  -- Binding response capture
+  response_status               text NOT NULL DEFAULT 'pending'
+                                -- 'pending' | 'accepted' | 'rejected'
+                                -- CHECK constraint enforces values
+  response_at                   timestamptz nullable
+  response_explanation          jsonb nullable
+                                -- ProseMirror-compatible JSON;
+                                -- recipient's reasoning, particularly
+                                -- important for rejections
+  
+  -- Token storage (Stateless Tokenized Interaction Pattern,
+  -- sixth canonical use)
+  recipient_token               text nullable
+                                -- single-use token; null after
+                                -- consumption
+  recipient_token_expires_at    timestamptz nullable
+  
+  -- Response deadline (drives clock event firing)
+  expected_response_date        date NOT NULL
+                                -- warrantor-set deadline
+  
+  created_at                    timestamptz NOT NULL DEFAULT now()
+  updated_at                    timestamptz NOT NULL DEFAULT now()
+  -- CHECK / app-layer invariant: tenant_id matches the referenced
+  -- claim's tenant_id
+```
+
+### Cross-entity dependencies
+
+- **claims (FK parent).** Notice of Defect is a claim-child entity.
+  ON DELETE behavior on claim_id is a Phase 3 implementation detail
+  parallel to other claim-child FK flags.
+- **contacts and public.users (recipient dual-FK).** Recipient
+  identity captured via FK + Snapshot Pattern. New contact_type
+  values added by migration as needed.
+- **Clock Event Infrastructure (Decision 9).** Seventh event type
+  added: notice_of_defect_response_overdue.
+- **Work Plans.** No FK relationship in either direction. The
+  Notice-of-Defect-to-Work-Plan operational sequence is captured at
+  the application layer through claim history, not at the schema
+  level.
+
+### Open architectural questions deferred
+
+- **ON DELETE behavior on claim_id.** Parallel to other claim-child
+  FK flags.
+- **ON DELETE behavior on recipient_contact_id and recipient_user_id.**
+  Soft-delete on contacts and tenant users means hard-deletion isn't
+  ordinary; FK clause is Phase 3 implementation detail.
+- **claim_summary_snapshot shape.** The structured shape of the
+  frozen claim snapshot (which claim fields are captured, JSONB
+  format details) is a Phase 3 implementation detail.
+- **Multiple notices_of_defect rows to the same recipient on the
+  same claim.** Whether resending a Notice of Defect to a
+  previously-noticed party creates a new row or updates the existing
+  row is a Phase 3 operational question.
+
+### Decision implications for already-committed sections
+
+None. Decision 14 introduces a new entity (notices_of_defect)
+without modifying any committed v2 section.
+
+---
+
+## Decision 15: Work Plan Status State Machine
+
+**Decided in Session 5f (Phase 3 Tier 3 Work Plan Workflow
+pre-triage).**
+
+### Context
+
+SOP 1 (Accepted Warranty Claim Lifecycle) describes the operational
+Work Plan lifecycle: Work Plan is drafted, sent for Customer Work
+Authorization, authorized, repair executes, Service Report submitted,
+claim closes. Several of these lifecycle moments belong to OTHER
+entities (Customer Work Authorization per Decision 11; Service
+Report per the Service Report Submission section) rather than to
+the Work Plan itself.
+
+The state machine needs to capture only the lifecycle moments that
+are uniquely Work Plan moments — not states that other entities
+already track.
+
+### Question
+
+What is the locked status enum for the work_plans table, and which
+lifecycle moments belong to other entities rather than to the Work
+Plan?
+
+### Resolution
+
+**Five locked commitments:**
+
+**15.1: Five-value status state machine.**
+
+The work_plans.status column has five values:
+
+- `draft` — Work Plan is being authored. Editable freely by the
+  authoring party (subcontractor in Path 2A, warranty professional
+  in Path 1 or post-rejection scenarios). The customer cannot see a
+  draft.
+- `sent_for_authorization` — Work Plan has been bundled into a
+  Customer Work Authorization request and sent to the customer.
+  The Customer Work Authorization's own state machine (Decision 11)
+  governs the approval/denial/revision lifecycle; the Work Plan stays
+  in sent_for_authorization while that runs, including across
+  revision cycles on the Work Authorization.
+- `authorized` — A Customer Work Authorization for this Work Plan
+  has been approved by the customer. Work Plan is ready for execution
+  per the warrantor's coordination.
+- `completed` — Repair work is complete and a Service Report has
+  been submitted per the Service Report Submission section's
+  lifecycle. Claim-level transitions and customer review of the
+  Service Report continue from here.
+- `cancelled` — Work Plan was created but will not be executed.
+  Terminal state for Work Plans that are abandoned (situation
+  changed, customer rejected Work Authorization and warrantor opted
+  not to revise, a different Work Plan superseded this one, etc.).
+
+CHECK constraint enforces values. Transitions are governed by Server
+Actions, not direct UPDATE on the column.
+
+**15.2: No `submitted` state.**
+
+A previously-considered `submitted` state (Work Plan finalized but
+not yet sent for Work Authorization) collapses into the draft →
+sent_for_authorization transition. Draft is editable up to the point
+of sending; the act of sending IS the transition.
+
+**15.3: No `in_execution` state.**
+
+A previously-considered `in_execution` state (repair actively
+underway on-site) is NOT modeled on the Work Plan. That lifecycle
+moment is tracked at the claim status level, not the Work Plan
+status level. Modeling it on both would duplicate state.
+
+**15.4: No scheduling state between authorized and completed.**
+
+A previously-considered intermediate state ("scheduled but not yet
+started") is NOT modeled. Same reasoning as in_execution — scheduling
+is a claim-level concern, captured in the claim's lifecycle rather
+than the Work Plan's status.
+
+**15.5: No revision/resent states on the Work Plan.**
+
+The Customer Work Authorization (Decision 11) has revised/resent
+states governing the customer-rejection-and-revision lifecycle.
+The Work Plan does NOT replicate these states. When a customer
+rejects a Work Authorization and the warrantor revises and re-sends,
+the Work Plan stays in sent_for_authorization while the underlying
+Work Authorization document goes through its own revision cycle.
+The Work Plan only transitions to authorized when a Work Authorization
+for it is finally approved.
+
+### Schema sketch
+
+The work_plans schema is detailed in the Work Plan Workflow section
+when drafted. The status column shape:
+
+```
+work_plans
+  ...
+  status              text NOT NULL DEFAULT 'draft'
+                      -- 'draft' | 'sent_for_authorization' |
+                      --   'authorized' | 'completed' | 'cancelled'
+                      -- CHECK constraint enforces values
+  ...
+```
+
+### Cross-entity dependencies
+
+- **Customer Work Authorization (Decision 11).** Work Plan's
+  sent_for_authorization state corresponds to the existence of one
+  or more Work Authorization documents for this Work Plan. The Work
+  Plan transitions to authorized when a Work Authorization
+  customer_decision = 'approved' for it. The revision lifecycle on
+  Work Authorizations does not propagate to Work Plan status.
+- **Service Report Submission section.** Work Plan transitions to
+  completed when a service_report row exists for the claim
+  documenting completion. Service Report's own customer review
+  lifecycle (accept/dispute/acquiesce) continues independently.
+- **Claim status.** Several Work Plan lifecycle moments
+  (scheduling, on-site execution, repair finalization) are tracked
+  at the claim status level rather than on the Work Plan. The Tier 3
+  claim lifecycle section will settle which specific claim status
+  values transition on which Work Plan state changes.
+
+### Open architectural questions deferred
+
+- **Authority rules for status transitions.** Which roles can move
+  Work Plans through which transitions (e.g., can any Reviewer
+  cancel a Work Plan, or only Team Admin; can a different reviewer
+  send a Work Plan for authorization that another reviewer drafted)
+  are operational authorization concerns, not schema-level.
+- **The transition from completed back to a non-terminal state.**
+  Whether a completed Work Plan can ever transition backward (e.g.,
+  Service Report disputed by customer leads to repair re-execution)
+  is operational and depends on whether the dispute resolution path
+  creates a new Work Plan or reopens an existing one. Phase 3
+  operational decision.
+
+### Decision implications for already-committed sections
+
+- **Customer Work Authorization section (Decision 11)** is the
+  source of revision lifecycle for the customer approval cycle. The
+  Work Plan Workflow section, when drafted, must cross-reference
+  Decision 11 for revision mechanics rather than re-documenting them
+  on the Work Plan side.
+- **Service Report Submission section** is the source of completion
+  capture and customer review lifecycle. Work Plan Workflow section
+  cross-references the Service Report section rather than duplicating
+  its lifecycle.
+- **Tier 3 Claim Lifecycle section (future)** will settle the
+  specific claim status values that transition on Work Plan state
+  changes. Decision 15 does not pre-commit those transitions.
+
+---
+
+## Decision 16: Parts Claims Out of Work Plan Workflow Scope
+
+**Decided in Session 5f (Phase 3 Tier 3 Work Plan Workflow
+pre-triage).**
+
+### Context
+
+Parts Claims (claim_type = 'replacement_parts') are a distinct
+claim_type already locked in the Claim Intake Data Model section,
+with intake fields captured in claim_type_data JSONB per the Parts
+Claim Datapoints workbook. Operationally, Parts Claim fulfillment
+involves shipping/receiving logistics — sourcing the part, shipping
+to site, customer or O&M provider receiving, installing — that
+differs fundamentally from field-repair execution covered by the
+Work Plan Workflow's schema (planned arrival, crew size, on-site
+SOW activities).
+
+The Parts Claim Datapoints workbook captures intake fields only —
+no fulfillment lifecycle data is documented in any of the source
+materials available for the Work Plan Workflow section. Architecting
+parts fulfillment within Work Plan Workflow would require
+improvising from first principles rather than drafting from
+documented operational reality, contrary to Phase 3 discipline.
+
+### Question
+
+Where does Parts Claim fulfillment activity live architecturally?
+
+### Resolution
+
+**Five locked commitments:**
+
+**16.1: Parts Claims do NOT flow through the Work Plan Workflow
+section.**
+
+The Work Plan Workflow architecture (Decisions 13, 14, 15) is
+designed for field-repair execution at customer sites. Parts Claims
+have a fundamentally different downstream lifecycle (shipping/
+receiving logistics rather than on-site crew coordination) that the
+Work Plan schema and its supporting entities do not naturally fit.
+
+**16.2: Parts Claims complete through a future Parts Fulfillment
+section.**
+
+A separate Tier 3 section (or future session) will architect the
+Parts Fulfillment lifecycle — sourcing, shipping, tracking,
+receiving, defective-part-return, etc. Sources for that section
+will need to be assembled (no operational SOP or workbook in the
+current source corpus documents this lifecycle).
+
+**16.3: The Work Plan Workflow section explicitly notes this scope
+boundary.**
+
+The Work Plan Workflow section's "What is NOT in" subsection will
+include a deliberate-omission item stating: Parts Claims
+(claim_type = 'replacement_parts') are not handled through the
+Work Plan Workflow; their fulfillment lifecycle is architected
+separately in a future Parts Fulfillment section.
+
+**16.4: Parts Claims still flow through Claim Intake unchanged.**
+
+The Claim Intake Data Model's claim_type = 'replacement_parts'
+schema (already locked in v2) handles Parts Claim intake — what
+the customer submits, captured in claim_type_data JSONB per the
+Parts Claim Datapoints workbook. Decision 16 changes nothing about
+Claim Intake.
+
+**16.5: Parts Claims do not get Notice of Defect, Work Plan, Work
+Authorization, or Service Report rows in Phase 1.**
+
+Phase 1 of Parts Claims architecture covers intake only. Whether
+parts fulfillment integrates with these existing entities (e.g.,
+does shipping involve a Customer Work Authorization for delivery
+access?) or has fully separate downstream entities is a future
+architectural decision when the Parts Fulfillment section is
+drafted.
+
+### Schema sketch
+
+No new schema in Decision 16. The Parts Fulfillment section, when
+drafted in a future session, will define its own schema.
+
+### Cross-entity dependencies
+
+- **Claim Intake Data Model.** Parts Claims continue to be captured
+  through the existing claim_type = 'replacement_parts' shape. No
+  change.
+- **Work Plan Workflow.** Parts Claims explicitly excluded from
+  Work Plan Workflow's scope.
+- **Future Parts Fulfillment section.** Will be architected
+  separately when source materials and operational requirements are
+  assembled.
+
+### Open architectural questions deferred (all for future Parts Fulfillment section)
+
+- **Parts Fulfillment entity shape.** Whether shipments are 1:1 with
+  claims, multiple shipments per claim, what fields track logistics.
+- **Relationship to Service Report Submission.** Whether a Parts
+  Claim uses the existing service_reports table to capture "customer
+  received and installed the part" or whether Parts Fulfillment has
+  its own completion capture entity.
+- **Clock event types for parts fulfillment.** Shipping reminders,
+  delivery confirmation overdue, etc.
+- **Customer Work Authorization interaction.** Whether delivery
+  access requires its own Work Authorization (event_type =
+  'parts_delivery' or similar future value).
+
+### Decision implications for already-committed sections
+
+- **Claim Intake Data Model section:** no change. Parts Claim intake
+  continues per the existing claim_type = 'replacement_parts'
+  schema.
+- **Work Plan Workflow section (when drafted):** must include the
+  explicit Parts Claims scope-boundary item per 16.3.
+
+---
+
 ## Future decisions
 
-Decisions 13+ will be appended below as triage-and-resolve work continues
-on the remaining Cat 3 items from the 14-flag list. The most urgent
-remaining Cat 3 items (in priority order):
+Decisions 17+ will be appended above this section as triage-and-resolve
+work continues on the remaining Cat 3 items from the original triage
+list. The most urgent remaining Cat 3 items (in priority order):
 
 - ALA signature capture mechanism (legal-force question, may be
   per-tenant)
