@@ -3188,3 +3188,329 @@ Parallel to the deliberate-omissions lists elsewhere:
   permission check at the Server Action layer (the reviewer is a tenant
   user with role = 'reviewer' or 'team_admin'), not a column on this
   table.
+
+## Acknowledgment Gate Pattern
+
+**Status: Designed.** This is a Tier 1 platform-wide pattern locked by
+Decision 12 (Phase 3 decisions log). The two tables
+(acknowledgment_gate_templates and acknowledgment_gate_records) are Phase
+3 tables to be migrated. The pattern's logical placement is alongside the
+other Tier 1 conventions (Stateless Tokenized Interaction, FK + Snapshot,
+Standard RLS, Custom Field System, Clock Event Infrastructure, ID
+Generation, Schema Source-of-Truth); appending it at the end of v2 here is
+a drafting-order convenience. Final section ordering is settled at the
+Tier 4 reorganization before swap to canonical.
+
+Some tokenized customer interactions need to put content in front of the
+customer before the customer sees the actual interaction form — a Site
+Readiness and Safety Requirements acknowledgment before a Customer Work
+Authorization is accepted, a Warranty Claim Submission Requirements
+acknowledgment before a claim is filed. The content is tenant-defined
+(the warrantor's legal, safety, or operational language); the gate is
+platform architecture (the same pre-form acknowledgment mechanism reused
+across multiple interactions). The pattern is documented here so that
+interactions opting into it do not each invent their own gate mechanism.
+
+### Two tables: templates and records
+
+Same parent-child shape as the ALA System: a template is tenant-defined
+and reusable, a record is per-acknowledgment-event and frozen.
+
+acknowledgment_gate_templates holds tenant-defined gate definitions —
+which interaction purpose the gate guards, the gate's content, the
+acknowledgment text shown beside the checkbox, whether typed name is
+required, and which template is the tenant's default for the purpose.
+
+acknowledgment_gate_records holds per-acknowledgment-event instantiations
+— for one specific protected entity (one claim being submitted, one work
+authorization being accepted), the customer's acknowledgment with the
+template content frozen at the moment they agreed, the acknowledger's
+identity capture, the timestamp, the IP for audit trail, and a
+polymorphic reference to the protected entity the acknowledgment
+authorizes.
+
+### Schemas
+
+    acknowledgment_gate_templates
+      id                          uuid PK
+      tenant_id                   uuid NOT NULL FK -> tenants
+      gate_purpose                text NOT NULL
+                                  -- 'claim_submission' |
+                                  --   'work_authorization' | other
+                                  --   future tokenized interaction
+                                  --   types
+                                  -- CHECK constraint enforces allowed
+                                  -- values; extensible like clock_events
+                                  -- event_type
+      name                        text NOT NULL
+                                  -- tenant-friendly identifier
+      content                     jsonb NOT NULL
+                                  -- ProseMirror-compatible JSON;
+                                  -- the gate's body content
+      acknowledgment_label        text NOT NULL
+                                  -- the text shown next to the checkbox
+                                  -- (e.g., "By checking this box, I
+                                  -- confirm...")
+      requires_typed_name         boolean NOT NULL DEFAULT false
+                                  -- whether the gate config requires
+                                  -- the customer to type their name in
+                                  -- addition to checking the box
+      is_default                  boolean NOT NULL DEFAULT false
+                                  -- at most one default per
+                                  -- (tenant_id, gate_purpose); whether
+                                  -- enforced by partial UNIQUE index or
+                                  -- app-layer is a Phase 3
+                                  -- implementation detail
+      deleted_at                  timestamptz nullable
+                                  -- soft-delete required; retired gates
+                                  -- must remain queryable for records
+                                  -- that captured acknowledgment
+                                  -- against them
+      created_at                  timestamptz NOT NULL DEFAULT now()
+      updated_at                  timestamptz NOT NULL DEFAULT now()
+
+    acknowledgment_gate_records
+      id                          uuid PK
+      tenant_id                   uuid NOT NULL FK -> tenants
+                                  -- denormalized per Standard RLS
+                                  -- Pattern
+      template_id                 uuid NOT NULL FK ->
+                                    acknowledgment_gate_templates
+      template_content_snapshot   jsonb NOT NULL
+                                  -- frozen content at acknowledgment
+                                  -- time; the customer agreed to
+                                  -- exactly this content, not whatever
+                                  -- the current template says
+      acknowledger_name           text nullable
+                                  -- populated only when the gate
+                                  -- requires a typed name
+      acknowledged_at             timestamptz NOT NULL
+      acknowledger_ip             text nullable
+                                  -- captured for audit trail
+      authorized_entity_type      text NOT NULL
+                                  -- 'claim' |
+                                  --   'work_authorization_document' |
+                                  --   future types
+                                  -- CHECK constraint enforces allowed
+                                  -- values
+      authorized_entity_id        uuid NOT NULL
+                                  -- FK target depends on
+                                  -- authorized_entity_type; shape is a
+                                  -- Phase 3 implementation detail (see
+                                  -- below)
+      created_at                  timestamptz NOT NULL DEFAULT now()
+
+Both tables follow the Standard RLS Pattern's six steps: tenant_id FK,
+RLS enabled, the standard tenant-scoped SELECT policy, service-role-only
+writes, the required grants. tenant_id is denormalized onto both rows
+directly per the convention.
+
+Soft-delete on templates (deleted_at) is required, not optional. A
+template retired today may have records pointing to it from acknowledgments
+captured last year, and those records must remain readable — the frozen
+content_snapshot preserves what the customer actually agreed to, but the
+template_id FK must remain valid for reporting and historical query.
+Hard-deleting a template would break the relationship.
+
+The is_default boolean identifies the tenant's primary template for a
+gate_purpose. At most one is_default = true per (tenant_id, gate_purpose)
+is the architectural intent; whether this is enforced by a partial UNIQUE
+index or by an application-layer invariant is a Phase 3 implementation
+detail, parallel to ALA's is_default flag.
+
+### gate_purpose: per-purpose configuration
+
+A gate_purpose enum identifies what interaction the gate guards. Phase 1
+values:
+
+- claim_submission — guards a Claim Intake tokenized intake form
+- work_authorization — guards a Customer Work Authorization tokenized
+  acceptance form
+
+The enum is extensible the same way Decision 9's clock_events event_type
+is extensible. A future tokenized customer interaction that benefits from
+a pre-form gate adds a new gate_purpose value (and updates the CHECK
+constraint via migration) without restructuring the tables.
+
+### Optional per tenant per purpose
+
+The platform supports gates natively, but they are not mandatory. A
+tenant configures a gate template for a given gate_purpose only if their
+operational practice requires one. A tenant whose external compliance
+processes already handle the equivalent acknowledgment — or whose
+warrantor agreements don't include such gates — leaves the gate_purpose
+unconfigured. Customers under that tenant proceed directly to the
+interaction form without ever seeing a gate.
+
+This framing matters. The pattern's presence in v2 is not an assertion
+that warrantors should require gates; it is platform-level support for
+warrantors who do. The platform doesn't impose safety or legal language
+on tenants who already have external processes for it.
+
+### One gate per protected entity in Phase 1
+
+A protected entity (a claim being submitted, a work authorization being
+accepted) carries at most one acknowledgment_gate_records row. The
+acknowledgment is a one-time event per entity: once the customer
+acknowledges and the record exists, the gate is not shown again for that
+entity on subsequent link clicks.
+
+Multi-gate-per-entity is deferred as speculative architecture. A tenant
+who needs to capture multiple distinct acknowledgments for a single
+protected entity composes them into one longer gate template's content
+rather than chaining multiple gate records. If real operational
+requirements surface that warrant multi-gate-per-entity (different
+acknowledgments authorized at different points in an entity's lifecycle,
+for example), the architecture revisits.
+
+### Rich-text content via ProseMirror JSON
+
+The gate's content column is ProseMirror-compatible JSON per Decision 4,
+the same convention as ALA template content, detailed_description on
+claims, claim emergency and offline-condition fields, the service report
+rich-text fields, and rich-text custom field values. Tenants get
+formatting flexibility (headers, lists, emphasis, links) without the
+platform pre-deciding the document shape. The character cap defaults
+from Decision 4 apply.
+
+### Polymorphic protected-entity reference
+
+The acknowledgment_gate_records row references the entity it authorizes
+through two columns: authorized_entity_type and authorized_entity_id.
+The type column captures which kind of entity is protected (claim,
+work_authorization_document, future types); the id column carries the
+uuid of the specific row.
+
+Decision 12 locks the two-column shape but defers the implementation of
+the polymorphic FK to Phase 3. The choice is between:
+
+- A single nullable column per supported entity type (separate claim_id
+  and work_authorization_document_id columns, with a CHECK enforcing
+  exactly one non-null), giving real referential integrity but adding
+  one column per supported entity type.
+- A single polymorphic authorized_entity_id column without
+  database-enforced FK integrity, with application-layer dispatch by
+  authorized_entity_type, keeping the column count small but losing the
+  database-enforced FK guarantee.
+- A junction table per (entity_type, entity_id) pair, supporting many-to-
+  many in principle but contradicting the one-gate-per-entity commitment
+  above.
+
+The right answer depends on how many authorized entity types the
+platform actually ends up with and on operational ergonomics that
+surface during build. Decision 12 commits to the two-column shape; the
+mechanics are downstream. Same restraint pattern as ON DELETE behaviors
+across other entities.
+
+### Gate mechanics
+
+The customer flow:
+
+1. Customer clicks a tokenized link for an interaction (claim intake,
+   work authorization, etc.). The Stateless Tokenized Interaction
+   Pattern's existing token validation runs first.
+2. The Server Action handling the tokenized link checks whether the
+   tenant has a configured gate template for the interaction's
+   gate_purpose. If no template is configured, the Server Action skips
+   the gate and renders the interaction form directly.
+3. If a template is configured, the Server Action checks whether an
+   acknowledgment_gate_records row exists for this specific protected
+   entity (by authorized_entity_type and authorized_entity_id). If a
+   record exists, the Server Action skips the gate and renders the
+   interaction form. If no record exists, the Server Action renders the
+   gate screen.
+4. The customer reads the gate content, checks the acknowledgment box,
+   and (if requires_typed_name on the template is true) types their
+   name.
+5. On submission, the Server Action creates an acknowledgment_gate_records
+   row capturing template_id, the frozen template_content_snapshot,
+   acknowledger_name (if required), acknowledged_at, acknowledger_ip,
+   and the polymorphic reference to the protected entity.
+6. The Server Action then renders the interaction form. Subsequent
+   tokenized link clicks for the same protected entity skip the gate
+   because the record exists.
+
+The frozen content_snapshot is captured at acknowledgment, not
+referenced live through template_id. Same defensibility logic as ALA's
+content_snapshot and the FK + Snapshot Pattern: the customer agreed to
+exactly the content at acknowledgment time, and a later template
+revision must not retroactively alter what they agreed to. The
+template_id FK preserves the relationship for reporting; the
+content_snapshot preserves the historical truth.
+
+The gate is an interstitial on the existing tokenized link, not a
+separate tokenized interaction. There is no second token, no second
+expires_at, no second consumed_at. The Stateless Tokenized Interaction
+Pattern's token (on the protected entity's record or in its own table
+per that pattern's "shape to copy, not shared store" rule) is the
+authentication surface; the gate is rendered or skipped by the same
+Server Action that ultimately renders the interaction form.
+
+### Cross-entity dependencies
+
+The pattern is referenced by tokenized customer interaction sections
+that may have gate configurations:
+
+- Claim Intake Data Model uses gate_purpose = 'claim_submission'. A
+  tenant who has configured a claim submission gate template requires
+  the customer to acknowledge it before the intake form renders. The
+  existing Claim Intake section's Stateless tokenized intake link
+  subsection needs revision to cross-reference this pattern (the
+  Decision 12 follow-up work item).
+- Customer Work Authorization (drafted in a parallel session) uses
+  gate_purpose = 'work_authorization'. The Work Authorization section
+  cross-references this pattern when discussing its tokenized customer
+  acceptance form.
+
+Other tokenized customer interactions — registration assignee
+submission, supply-only delivery reporting, service report customer
+review — could opt into the pattern by adding their gate_purpose value
+and configuring tenant templates. Whether they do is a per-interaction
+decision when those sections are drafted, revised, or extended;
+Decision 12 does not lock the answer.
+
+### Outstanding architectural questions
+
+Flagged for downstream / Phase 3 implementation:
+
+- Polymorphic FK shape (Decision 12.6). The choice between separate
+  per-entity-type FK columns, a single polymorphic authorized_entity_id
+  with app-layer dispatch, or a junction table is a Phase 3
+  implementation detail. Decision 12 locks the column-level shape;
+  the mechanics are downstream.
+- is_default enforcement. Partial UNIQUE index on (tenant_id,
+  gate_purpose) where is_default = true vs application-layer invariant
+  is a Phase 3 implementation detail, parallel to ALA's is_default
+  flag.
+- ON DELETE behavior on acknowledgment_gate_records.template_id. The
+  soft-delete-on-templates convention means hard-deletion isn't an
+  ordinary path, but the FK clause itself is a Phase 3 implementation
+  detail.
+- gate_purpose enum CHECK constraint extension mechanism. Adding a new
+  gate_purpose value is a migration that updates the CHECK constraint,
+  same as the clock_events event_type and the claim claim_type enums.
+
+### What is NOT in the acknowledgment gate pattern
+
+Parallel to the deliberate-omissions lists elsewhere:
+
+- No second token. The gate is an interstitial on the existing tokenized
+  link, not its own tokenized interaction. Token validation runs once
+  per click, in the protected entity's tokenized interaction layer.
+- No multi-gate-per-entity. One gate per protected entity in Phase 1.
+  Multiple acknowledgments are composed into one longer gate template's
+  content. If a tenant operationally needs more than one gate per entity,
+  the architecture revisits.
+- No tenant enforcement of "must have a gate configured." Whether a
+  warrantor configures gates is up to the warrantor's compliance
+  practice. Tenants without configured gates proceed without them.
+- No expiration on acknowledgments. An acknowledgment_gate_records row
+  is valid for the protected entity's lifetime. If operational requirements
+  surface that an acknowledgment should "stale out" and re-prompt the
+  customer (compliance language updated, contract renegotiated), the
+  architecture revisits.
+- No Custom Field System involvement. Gates are tenant-defined documents
+  with a structured shape; they are not custom fields on claims or other
+  entities. The Custom Field System is for fields that vary by tenant on
+  the entities themselves, not for legal/safety language attached to
+  interaction surfaces.
