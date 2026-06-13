@@ -4130,3 +4130,569 @@ Parallel to the deliberate-omissions lists elsewhere:
   interstitial on the existing tokenized link (customer_token
   above), not a separate tokenized interaction. The Acknowledgment
   Gate Pattern section documents this mechanism.
+
+## Work Plan Workflow
+
+**Status: Designed at the architectural level.** This is the largest Tier 3
+section, depending on substantial pre-triage work resolved in Decisions 13,
+14, 15, and 16 (Phase 3 decisions log). Decision 13 locks the execution_path
+enum, the internal_team_id FK, and the new internal_teams table. Decision
+14 locks the Notice of Defect entity as a separate claim-child entity with
+no FK relationship to Work Plan (cross-referenced here; its own section
+documents its schema). Decision 15 locks the work_plans status state
+machine at five values. Decision 16 explicitly excludes Parts Claims from
+the Work Plan Workflow scope. The two tables documented here
+(work_plans and internal_teams) are Phase 3 tables to be migrated. The
+operational state machine specifics (authority rules per transition,
+backward-transition handling on customer-disputed completion, etc.) belong
+to downstream operational drafting.
+
+A Work Plan is the document detailing the corrective actions the warrantor
+or executing subcontractor intends to perform to address a claim. SOP 6
+frames its purpose as ensuring "transparency, alignment, and agreement
+among all parties involved before the repair work commences." It is the
+warrantor's INTENT (the planned execution); Customer Work Authorization
+(Decision 11) is the customer-facing COMMITMENT generated from that intent.
+The two entities are intentionally separate: a Work Plan captures what
+the warrantor plans, a Work Authorization captures what the customer
+agreed to permit.
+
+### Schemas
+
+Two tables. internal_teams is a tenant-defined registry of internal teams
+the warrantor uses for warranty work; work_plans is the per-claim
+operational record of planned execution.
+
+    internal_teams
+      id              uuid PK
+      tenant_id       uuid NOT NULL FK -> tenants
+                      -- denormalized per Standard RLS Pattern
+      name            text NOT NULL
+                      -- tenant's own label (e.g., "Warranty FOS",
+                      -- "Construction Support", "Tier 1 Service",
+                      -- whatever fits the warrantor's organizational
+                      -- structure)
+      description     text nullable
+                      -- optional explanatory note
+      deleted_at      timestamptz nullable
+                      -- soft-delete required; historical work_plans
+                      -- retain internal_team_id FK even when teams
+                      -- are retired
+      created_at      timestamptz NOT NULL DEFAULT now()
+      updated_at      timestamptz NOT NULL DEFAULT now()
+
+    work_plans
+      id                            uuid PK
+      tenant_id                     uuid NOT NULL FK -> tenants
+                                    -- denormalized per Standard RLS
+      claim_id                      uuid NOT NULL FK -> claims
+                                    -- NO UNIQUE constraint;
+                                    -- one-to-many with claim
+      execution_path                text NOT NULL
+                                    -- 'warrantor_self_performs' |
+                                    --   'scope_owned_subcontractor' |
+                                    --   'outsourced_subcontractor' |
+                                    --   'customer_self_services'
+                                    -- CHECK constraint enforces values
+      internal_team_id              uuid nullable FK -> internal_teams
+                                    -- CHECK: NOT NULL when
+                                    -- execution_path =
+                                    -- 'warrantor_self_performs',
+                                    -- NULL otherwise
+      subcontractor_contact_id      uuid nullable FK -> contacts(id)
+                                    -- CHECK: NOT NULL when
+                                    -- execution_path IN
+                                    -- ('scope_owned_subcontractor',
+                                    -- 'outsourced_subcontractor'),
+                                    -- NULL otherwise
+      subcontractor_name_snapshot   text nullable
+      subcontractor_email_snapshot  text nullable
+      subcontractor_phone_snapshot  text nullable
+      warranty_professional_user_id uuid NOT NULL FK -> public.users(id)
+                                    -- the tenant user managing this
+                                    -- Work Plan (the workbook's
+                                    -- "Warrantor Contact"); always
+                                    -- populated regardless of
+                                    -- execution_path
+      work_plan_type                text NOT NULL
+                                    -- 'repair' | 'inspection' | 'both'
+                                    -- CHECK constraint enforces values
+      status                        text NOT NULL DEFAULT 'draft'
+                                    -- 'draft' | 'sent_for_authorization'
+                                    -- | 'authorized' | 'completed' |
+                                    --   'cancelled'
+                                    -- CHECK constraint enforces values
+      planned_start_at              timestamptz NOT NULL
+                                    -- SOP 6 component 1: Planned
+                                    -- Arrival Date and Time
+      planned_end_at                timestamptz NOT NULL
+                                    -- SOP 6 component 6: Estimated
+                                    -- Duration, captured as start+end
+                                    -- pair matching Customer Work
+                                    -- Authorization Decision 11
+      crew_size                     integer NOT NULL
+                                    -- SOP 6 component 2: Crew Size
+      corrective_actions            jsonb NOT NULL
+                                    -- SOP 6 component 3: Corrective
+                                    -- Actions; ProseMirror-compatible
+                                    -- JSON per Decision 4
+      required_materials_equipment  jsonb nullable
+                                    -- SOP 6 component 4: Required
+                                    -- Materials and Equipment;
+                                    -- ProseMirror-compatible JSON;
+                                    -- workbook's "Special Equipment
+                                    -- Needed" maps here; nullable
+                                    -- because not every Work Plan
+                                    -- requires special materials
+      repair_scope_approach         jsonb NOT NULL
+                                    -- SOP 6 component 5: Repair Scope
+                                    -- and Approach; ProseMirror-
+                                    -- compatible JSON; workbook's
+                                    -- "Service Scope of Work" maps here
+      safety_considerations         jsonb nullable
+                                    -- SOP 6 component 7: Safety
+                                    -- Considerations; ProseMirror-
+                                    -- compatible JSON; nullable
+                                    -- because tenants may rely on the
+                                    -- Acknowledgment Gate Pattern's
+                                    -- Site Readiness & Safety
+                                    -- Requirements gate for much of
+                                    -- this content
+      site_access_coordination      jsonb nullable
+                                    -- SOP 6 component 8: Site Access
+                                    -- and Coordination; ProseMirror-
+                                    -- compatible JSON; nullable
+                                    -- because the Customer Work
+                                    -- Authorization captures most
+                                    -- site access fields directly
+      created_at                    timestamptz NOT NULL DEFAULT now()
+      updated_at                    timestamptz NOT NULL DEFAULT now()
+      -- CHECK / app-layer invariant: tenant_id matches the referenced
+      -- claim's tenant_id
+
+Both tables follow the Standard RLS Pattern's six steps: tenant_id FK,
+RLS enabled, the standard tenant-scoped SELECT policy, service-role-only
+writes, the required grants. tenant_id is denormalized onto both directly
+per the convention.
+
+### Event-specific: one-to-many with claims
+
+A claim has zero, one, or many Work Plans across its lifecycle. There is
+no UNIQUE constraint on claim_id. Each Work Plan addresses one specific
+execution effort — initial repair work, follow-up after dispute, an
+inspection that turned into remediation. A claim with multiple distinct
+repair events has multiple Work Plans, one per event.
+
+This is the same architectural shape as Customer Work Authorization and
+Notice of Defect, and the same contrast against ALA (UNIQUE on claim_id,
+one-per-Indistinct-outcome) and Service Report (UNIQUE on claim_id,
+one-per-claim-completion). The one-to-many pattern applies because Work
+Plans bound specific execution events, not claims as a whole; multiple
+events per claim is operationally expected.
+
+### Execution path and internal teams
+
+Decision 13 establishes a two-column shape for capturing who executes the
+repair work. The columns are orthogonal axes — what kind of party
+executes (execution_path) and which specific party (internal_team_id or
+subcontractor_contact_id, conditional on execution_path).
+
+The execution_path enum has four locked values, mapping to v1's Four
+Work Plan Execution Paths:
+
+- warrantor_self_performs — an internal team executes the repair (v1's
+  Path 1).
+- scope_owned_subcontractor — the original installer with an active
+  warranty obligation executes the repair (v1's Path 2A).
+- outsourced_subcontractor — a third party procured via RFQ executes the
+  repair (v1's Path 2B).
+- customer_self_services — the customer executes the repair with
+  warrantor reimbursement (v1's Path 3).
+
+This enum is extensible. A fifth execution path that surfaces
+operationally adds a new value via migration without restructuring.
+
+The internal_team_id FK captures the specific internal team executing
+the repair when execution_path = 'warrantor_self_performs'. A CHECK
+constraint enforces that internal_team_id is non-null exactly when
+execution_path equals that value, null otherwise. The internal_teams
+table is tenant-defined: each warrantor populates it with their own
+team labels (Terrasmart uses "Warranty FOS" and "Construction Support";
+other warrantors define their own naming) and the platform does not
+enshrine any specific team labels at the enum level.
+
+Decision 13 explicitly does not add an is_primary boolean to
+internal_teams. The primary-vs-fallback distinction between, e.g.,
+warranty FOS as the primary internal team and construction support as
+the fallback, is not architecturally tracked at the team level. Cost
+analysis answers through the future Cost Tracking section joining
+work_plans to internal_teams via internal_team_id; UI default-selection
+behavior (pre-selecting a default team when creating a work_plan) lives
+in tenants.settings if needed.
+
+The subcontractor_contact_id FK captures the specific subcontractor
+when execution_path is either scope_owned_subcontractor or
+outsourced_subcontractor. The capture follows the FK + Snapshot
+Pattern's single-FK shape: contact_id plus name/email/phone snapshots
+captured at Work Plan creation time. A CHECK constraint enforces that
+subcontractor_contact_id is non-null exactly when execution_path is one
+of the two subcontractor values, null otherwise.
+
+For execution_path = 'customer_self_services', both internal_team_id
+and subcontractor_contact_id are null. The customer-as-executor is
+captured through the claim's parent project's customer_id; no
+additional Work-Plan-level FK is needed.
+
+### The eight SOP 6 components as operational fields
+
+SOP 6 enumerates eight components a Work Plan contains. Each maps to a
+column or pair of columns on the work_plans schema:
+
+1. Planned Arrival Date and Time — planned_start_at (timestamptz)
+2. Crew Size — crew_size (integer)
+3. Corrective Actions — corrective_actions (ProseMirror JSONB)
+4. Required Materials and Equipment — required_materials_equipment
+   (ProseMirror JSONB, nullable); the workbook's "Special Equipment
+   Needed" maps here as the warrantor's representation
+5. Repair Scope and Approach — repair_scope_approach (ProseMirror JSONB);
+   the workbook's "Service Scope of Work" maps here
+6. Estimated Duration — captured as the pair planned_start_at and
+   planned_end_at (both timestamptz). The workbook's "Number of Days to
+   Complete" is derivable from the difference. The two-timestamp shape
+   mirrors Customer Work Authorization (Decision 11) for clean field
+   replication when generating a Work Authorization from a Work Plan.
+7. Safety Considerations — safety_considerations (ProseMirror JSONB,
+   nullable). Tenants who configure the Acknowledgment Gate Pattern's
+   Site Readiness and Safety Requirements gate may capture most safety
+   content there rather than in this field; the field stays nullable
+   to support both patterns.
+8. Site Access and Coordination — site_access_coordination (ProseMirror
+   JSONB, nullable). Customer Work Authorization captures structured
+   site access fields directly (site_emergency_address,
+   site_accessibility_date, operating_hours, special_access_required,
+   gate_code_needed, gate_code_details); this Work Plan field is the
+   warrantor's planning notes preceding that customer-facing structured
+   capture.
+
+All eight components are uniform across warrantors (SOP 6 frames them as
+the standard Work Plan content). No claim-type-driven JSONB shape
+variation parallel to claims.claim_type_data — the eight components apply
+regardless of which claim_type a Work Plan addresses.
+
+### Work Plan type
+
+The work_plan_type column captures whether a Work Plan covers repair
+work, inspection work, or both. Values: 'repair', 'inspection', 'both'.
+CHECK constraint enforces. This comes from the Work Plan Data Inputs
+workbook's "Work Plan Type" dropdown directly.
+
+The relationship between work_plan_type and Customer Work Authorization's
+event_type (which has values 'inspection', 'repair_work', 'site_visit',
+and future types) is operational and not yet locked at the architectural
+level. A Work Plan with work_plan_type = 'both' might generate a single
+Customer Work Authorization document with event_type = 'repair_work' (if
+the bundled approach is operationally preferred), or two separate
+Customer Work Authorization documents (one with event_type = 'inspection'
+and one with event_type = 'repair_work'), each referencing the same
+work_plans row via event_reference_id. Which pattern applies is flagged
+as a downstream operational question.
+
+### Status state machine
+
+Decision 15 locks the work_plans.status column at five values, capturing
+only the lifecycle moments that are uniquely Work Plan moments. Several
+operational states that might be expected (submitted, in_execution,
+scheduled, revised, resent) are deliberately NOT on the Work Plan because
+they belong to other entities' lifecycles or to the claim status level.
+
+- draft — Work Plan is being authored. Editable freely by the authoring
+  party (the subcontractor in Path 2A, the warranty professional in Path
+  1 or post-rejection scenarios). The customer cannot see a draft.
+- sent_for_authorization — Work Plan has been bundled into a Customer
+  Work Authorization request and sent to the customer. The Customer Work
+  Authorization's own state machine (Decision 11) governs the
+  approval/denial/revision lifecycle; the Work Plan stays in
+  sent_for_authorization while that runs, including across revision
+  cycles on the Work Authorization.
+- authorized — A Customer Work Authorization for this Work Plan has been
+  approved by the customer (customer_decision = 'approved' on the
+  corresponding work_authorization_documents row). Work Plan is ready
+  for execution per the warrantor's coordination.
+- completed — Repair work is complete and a Service Report has been
+  submitted per the Service Report Submission section's lifecycle.
+  Claim-level transitions and customer review of the Service Report
+  continue from here.
+- cancelled — Work Plan was created but will not be executed. Terminal
+  state for Work Plans that are abandoned (situation changed, customer
+  rejected Work Authorization and warrantor opted not to revise, a
+  different Work Plan superseded this one).
+
+Per Decision 15.5, the Work Plan does NOT replicate the
+revised/resent states from Customer Work Authorization. When a customer
+rejects a Work Authorization and the warrantor revises and re-sends, the
+Work Plan stays in sent_for_authorization while the underlying Work
+Authorization document goes through its own revision cycle. The Work
+Plan only transitions to authorized when a Work Authorization for it is
+finally approved.
+
+Transitions are governed by Server Actions, not direct UPDATE on the
+column. Authority rules for transitions (which roles can move which
+documents through which transitions) are operational concerns deferred
+to downstream drafting.
+
+### Cross-reference: Notice of Defect (Decision 14)
+
+Decision 14 establishes notices_of_defect as a separate claim-child
+entity capturing the warrantor's official notification that "this defect
+is yours; respond with acceptance/rejection." A Notice of Defect can be
+sent to any party type — subcontractors (Path 2A or 2B contacts),
+internal teams (Path 1 users via public.users dual-FK), vendors,
+original installers, future types.
+
+There is no FK relationship between Notice of Defect and Work Plan in
+either direction. The notices_of_defect table has no work_plan_id
+column; the work_plans table has no notice_of_defect_id column. The
+operational sequence — "a subcontractor accepted a Notice of Defect and
+then drafted a Work Plan" or "the warrantor rejected a Notice of Defect
+and sourced an alternate" — is captured at the application layer
+through the claim's history, not at the schema level.
+
+This decoupling is deliberate. Per Decision 14.4, the Notice of Defect's
+architectural responsibility ends at response capture. Whether a Work
+Plan, downstream tracking, dispute, or other activity follows from an
+accepted Notice is operational and contract-dependent. The application
+reads the claim's history to answer "which Notice of Defect led to this
+Work Plan" if that analysis is needed; the schema does not enforce the
+relationship.
+
+The notices_of_defect entity has its own schema and is documented in
+its own section (drafted in a future session). Decision 14 in the Phase
+3 decisions log holds the locked architectural specification.
+
+### Cross-reference: Customer Work Authorization (Decision 11)
+
+The Work Plan is bundled INTO a Customer Work Authorization request when
+the warrantor sends it for customer authorization. The FK direction is
+from Work Authorization to Work Plan, not the reverse:
+work_authorization_documents.event_type = 'repair_work' (or 'inspection'
+or 'site_visit' as applicable), with event_reference_id pointing to the
+work_plans row.
+
+The work_plans table has no work_authorization_id column. The
+relationship is captured on the Work Authorization side via the
+polymorphic event_reference_id, per Decision 11's locked schema.
+
+The Work Plan transitions to authorized when a Customer Work
+Authorization for it has customer_decision = 'approved'. The Server
+Action handling the Work Authorization approval triggers this Work Plan
+status update.
+
+Several fields appear on both work_plans and work_authorization_documents
+— planned_start_at, planned_end_at, crew_size, and the substance of
+sow_activities (composed at Work Authorization generation time from the
+Work Plan's corrective_actions and repair_scope_approach). This
+duplication is intentional. Work Plan is the warrantor's INTENT;
+Customer Work Authorization snapshots that intent for the customer's
+review and approval. A Work Plan revision after a customer denial may
+update the Work Plan's fields and then trigger Work Authorization
+revision separately; the duplication isolates the warrantor's planning
+state from the customer-facing commitment state.
+
+### Cross-reference: Service Report Submission
+
+The Work Plan transitions to completed when a service_reports row
+exists for the parent claim documenting completion. Service Report
+Submission section documents the service_reports table and its
+lifecycle; the Work Plan does not replicate any of that schema or
+state. Service Report's own customer review lifecycle
+(accept/dispute/acquiesce) continues independently of the Work Plan's
+status.
+
+The Server Action handling service report submission triggers the Work
+Plan status update to completed. The Work Plan's transition is one of
+several effects of service report submission; the claim status also
+transitions per the Service Report Submission section's specification.
+
+### Subcontractor and internal team assignee capture
+
+Decision 13 establishes the two-column shape for execution path and
+team capture. The subcontractor capture (when execution_path is
+scope_owned_subcontractor or outsourced_subcontractor) uses the FK +
+Snapshot Pattern's single-FK shape (subcontractor_contact_id plus
+name/email/phone snapshots), parallel to how projects.customer_id
+captures the customer.
+
+The structural reason for single-FK + Snapshot here, rather than the
+dual-FK pattern Service Report Submission uses for its submitter: in
+Service Report's case, the submitter could be either a contact
+(subcontractor) or a tenant user (warrantor self-perform team) and the
+dual-FK accommodates either. In Work Plan's case, the question of
+"who executes" is already captured by execution_path; the assignee
+capture splits cleanly by path — internal_team_id for self-performs,
+subcontractor_contact_id for subcontractor paths, neither for customer
+self-services. There's no need for a single column accepting either
+contact or user reference because the paths are pre-disambiguated.
+
+The warranty_professional_user_id FK captures the warranty professional
+managing this Work Plan from the warrantor's side, regardless of
+execution_path. The workbook's "Warrantor Contact" fields (Name, Phone,
+Email) map to this FK plus its joined user record — they are not
+captured as redundant columns on work_plans.
+
+### Cross-entity dependencies
+
+Real cross-entity dependencies, deferred or resolved:
+
+- Claims (FK parent). ON DELETE behavior on claim_id is a Phase 3
+  implementation detail parallel to other claim-child FK flags. The
+  architectural commitment is that Work Plan documents are always
+  child entities of a claim.
+- internal_teams (FK). The work_plans.internal_team_id FK points to
+  this section's internal_teams table when execution_path =
+  'warrantor_self_performs'.
+- contacts (FK). The work_plans.subcontractor_contact_id FK points to
+  the Unified Contacts Directory's contacts table for subcontractor
+  execution paths. The contact_type values used (subcontractor,
+  subcontractor_contact, or future variations) are governed by the
+  contacts directory's enum.
+- public.users (FK). The work_plans.warranty_professional_user_id FK
+  points to the tenant user managing the Work Plan.
+- Inspections Foundation. Inspections is a separate entity with no
+  direct FK relationship to work_plans in either direction. Both Work
+  Plan and Inspections can be referenced by Customer Work Authorization
+  documents via Decision 11's polymorphic event_reference_id mechanism
+  (event_type = 'inspection' pointing to inspections rows; event_type
+  = 'repair_work' pointing to work_plans rows). The operational
+  sequence where a Work Plan with work_plan_type = 'inspection' or
+  'both' relates to one or more inspections rows is captured via the
+  claim's history at the application layer, not via direct FK between
+  work_plans and inspections.
+- ALA System. ALA is a parallel claim-level entity for financial
+  liability on Indistinct claims. ALA's blocking-gate (investigation
+  cannot proceed without ALA approval on Indistinct claims) operates
+  independently of Customer Work Authorization's blocking-gate
+  (on-site activity cannot proceed without Work Authorization approval
+  per Decision 11.2). Work Plan is the warrantor's intent that flows
+  through the Work Authorization gate; Work Plan itself does not gate
+  anything at the architectural level. An Indistinct claim requiring
+  on-site investigation may have an approved ALA, one or more Work
+  Plans, and corresponding Customer Work Authorizations, with each
+  entity contributing its own architectural commitment to the claim
+  lifecycle.
+- Notice of Defect (Decision 14). No FK either direction. Operational
+  sequence captured via claim history.
+- Customer Work Authorization (Decision 11). FK is on the Work
+  Authorization side via event_reference_id when event_type =
+  'repair_work'. Work Plan transitions to authorized on Work
+  Authorization approval.
+- Service Report Submission. No FK from Work Plan to Service Report.
+  Service Report references claim_id; the Work Plan status updates to
+  completed when a service_reports row exists for the claim.
+- Clock Event Infrastructure (Decision 9). No direct clock_events
+  interaction at the work_plans level. The cross-referenced entities
+  (notices_of_defect, work_authorization_documents, service_reports)
+  use clock events for their own reminder firing.
+- Custom Field System (Decision 3). Work Plan is NOT in Phase 1
+  custom-field entity scope. Tenant-configurable variation in Work
+  Plan fields is not supported through custom_field_definitions in
+  Phase 1. If operational pressure surfaces a need, Decision 3's
+  three-entity scope (projects, warranty_registrations, claims) gets
+  revisited; until then, the Work Plan schema is fixed at the
+  architectural level.
+
+### Outstanding architectural questions
+
+Flagged for downstream / Phase 3 implementation:
+
+- ON DELETE behavior on claim_id. Parallel to other claim-child FK
+  flags across v2; the architectural restraint suggests RESTRICT with
+  soft-delete as the cleanup path, but the specific clause is Phase 3.
+- ON DELETE behavior on internal_team_id. Soft-delete on internal_teams
+  means hard-deletion isn't an ordinary path, but the FK clause is
+  Phase 3.
+- ON DELETE behavior on subcontractor_contact_id. Soft-delete on
+  contacts means hard-deletion isn't an ordinary path; FK clause is
+  Phase 3.
+- ON DELETE behavior on warranty_professional_user_id. Soft-remove on
+  tenant users (removed_at semantics) means hard-deletion isn't an
+  ordinary path; FK clause is Phase 3.
+- Authority rules for status transitions. Which roles can move Work
+  Plans through which transitions (can any Reviewer cancel a Work
+  Plan, or only Team Admin; can a different reviewer send a Work Plan
+  for authorization that another reviewer drafted) are operational
+  authorization concerns, not schema-level.
+- The transition from completed back to a non-terminal state.
+  Whether a completed Work Plan can ever transition backward (Service
+  Report disputed by customer leads to repair re-execution) is
+  operational and depends on whether the dispute resolution path
+  creates a new Work Plan or reopens an existing one.
+- The work_plan_type = 'both' relationship to Customer Work
+  Authorization documents. A Work Plan covering both repair and
+  inspection may generate one bundled Work Authorization document or
+  two separate documents (one per event_type). Which pattern applies
+  is a downstream operational decision.
+- sow_activities composition at Customer Work Authorization
+  generation. Whether work_authorization_documents.sow_activities is
+  generated by composing the Work Plan's corrective_actions and
+  repair_scope_approach automatically, or is independently captured at
+  Work Authorization creation time, is a Phase 3 implementation detail.
+
+### What is NOT in the work plan workflow
+
+Parallel to the deliberate-omissions lists elsewhere:
+
+- **Parts Claims explicit exclusion.** Per Decision 16.3, Parts Claims
+  (claim_type = 'replacement_parts') are NOT handled through the Work
+  Plan Workflow. Their fulfillment lifecycle (sourcing, shipping,
+  tracking, receiving, defective-part-return) is architected
+  separately in a future Parts Fulfillment section. The Work Plan
+  schema and supporting entities are designed for field-repair
+  execution at customer sites, not shipping/receiving logistics. A
+  Parts Claim's intake remains captured per the existing Claim Intake
+  Data Model section's claim_type = 'replacement_parts' shape; what
+  happens after intake is governed by a separate architecture not in
+  this section's scope.
+- No notice_of_defect_id FK. Per Decision 14.4, Notice of Defect and
+  Work Plan have no FK relationship in either direction. Operational
+  sequence captured via claim history.
+- No work_authorization_id FK on work_plans. Per Decision 11, the FK
+  is on the Work Authorization side via event_reference_id. Adding a
+  reverse FK on work_plans would duplicate the relationship.
+- No service_report_id FK on work_plans. Per the Service Report
+  Submission section, the Service Report references claim_id; the
+  Work Plan transitions to completed based on service_report
+  existence for the claim, not on a direct FK.
+- No submitted state on status. Per Decision 15.2, the
+  previously-considered submitted state collapses into the draft ->
+  sent_for_authorization transition. Draft is editable up to the
+  point of sending; the act of sending IS the transition.
+- No in_execution state on status. Per Decision 15.3, the
+  previously-considered in_execution state is NOT modeled on the
+  Work Plan. That lifecycle moment is tracked at the claim status
+  level rather than the Work Plan status level. Modeling it on both
+  would duplicate state.
+- No scheduling state between authorized and completed. Per
+  Decision 15.4, this is a claim-level concern, not a Work Plan
+  status.
+- No revised or resent states on status. Per Decision 15.5, the
+  Customer Work Authorization (Decision 11) has these states
+  governing the customer-rejection-and-revision lifecycle. The Work
+  Plan does NOT replicate them. The Work Plan stays in
+  sent_for_authorization while the underlying Work Authorization
+  document goes through its own revision cycle.
+- No customer FK directly on work_plans. The customer is the parent
+  project's customer, reachable through claim_id ->
+  warranty_registration_id -> projects.customer_id with project's
+  customer snapshots. Duplicating on Work Plan would create a sync
+  surface.
+- No Custom Field System involvement at the entity level. Work Plan
+  is not in Decision 3's Phase 1 custom-field entity scope. Tenant-
+  configurable variation in Work Plan fields beyond what the eight
+  SOP 6 components capture is not supported through
+  custom_field_definitions in Phase 1.
+- No is_primary or default-team flag on internal_teams. Per Decision
+  13.5, the primary-vs-fallback distinction between internal teams
+  is not architecturally tracked at the team level. UI default-
+  selection behavior lives in tenants.settings if needed; cost
+  analysis answers through future Cost Tracking joining work_plans
+  to internal_teams.
