@@ -1233,6 +1233,72 @@ Decisions 17+ will be appended above this section as triage-and-resolve
 work continues on the remaining Cat 3 items from the original triage
 list. The most urgent remaining Cat 3 items (in priority order):
 
+### Decision 17 (next-session focused workstream)
+
+**Inspections Expansion + tenant-editable defaults pattern + Customer
+Work Authorization revision.**
+
+Surfaced mid-drafting of Work Plan Workflow (Session 5f). Three new
+enums proposed for the inspections entity, plus potentially a new
+Tier 1 platform pattern.
+
+Proposed enums (tenant-editable defaults; defaults provided by platform,
+admin at company setup can edit):
+
+- inspection_type (4 values): Warranty, Condition Assessment,
+  Remediation Verification, Failure Investigation
+- inspection_trigger (7 values): Warranty Claim, Customer Request,
+  Repeat Condition Verification, Post-Remediation Verification,
+  Failure Investigation, Preventative / Condition Assessment,
+  Internal Review
+- inspection_status (3 values): Open (inspection created, observations
+  in progress), Under Review (warranty review in progress), Issued
+  (customer NCR completed and released)
+
+The proposed status enum REPLACES the currently-committed 4-value
+status in Inspections Foundation (requested, scheduled, in_progress,
+completed). Semantics are different — the new shape captures the
+warranty-review workflow state rather than just the inspection
+lifecycle.
+
+Architectural questions to resolve in Decision 17:
+
+- The "tenant-editable defaults" pattern is potentially a new Tier 1
+  platform pattern. v2 currently has platform-locked enums OR
+  tenant-defined JSONB/templates; tenant-editable defaults is a third
+  shape (platform provides defaults, tenants can edit). If formalized,
+  it has implications across many sections (work_plan_type,
+  execution_path, claim_type, gate_purpose, event_type values on Work
+  Authorization and Notice of Defect) currently locked as
+  platform-level enums.
+- The status enum REPLACEMENT requires careful framing — the existing
+  4-value enum was corroborated by audit; the new 3-value enum needs
+  source-grounded justification.
+- Interaction with the existing performed_by / paid_by orthogonal
+  axes on Inspections Foundation. Adding inspection_type and
+  inspection_trigger creates additional axes; whether they're all
+  orthogonal or some are derived needs explicit framing.
+- The term "NCR" (non-conformance report) appearing in the status
+  semantics. Whether NCR is platform-level concept or per-tenant
+  naming convention needs confirmation.
+
+Downstream ripple identified by chat 4 verification:
+
+- Inspections Foundation section (obvious — its own schema changes
+  substantively).
+- Customer Work Authorization section (Decision 11) — contains a
+  specific status-value reference: "Work Authorization with
+  customer_decision = 'approved' is required before the inspection's
+  status can advance from 'requested' to 'scheduled'." This becomes
+  stale if the status enum changes; needs section revision parallel
+  to the Inspections Foundation revision.
+- Possibly a new Tier 1 pattern section (if tenant-editable defaults
+  is formalized).
+
+Work Plan Workflow has no material dependency on Decision 17;
+verified by chat 4 independent read during Session 5f. Decision 17
+work is its own focused architectural session.
+
 - ALA signature capture mechanism (legal-force question, may be
   per-tenant)
 - Claim eligibility rules + emergency carve-outs
