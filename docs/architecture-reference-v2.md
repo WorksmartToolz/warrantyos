@@ -2744,21 +2744,18 @@ downstream sections:
   capture inspection-specific tenant-shaped data does so through
   inspection_report JSONB; the platform does not extend custom field
   support to inspections in Phase 1.
-- Claimant attendance ("Joint Inspection" posture). Whether
-  claimant-invitation or claimant-attendance is captured as a structured
-  data point on inspections (e.g., a claimant_invited boolean, a
-  claimant_attended boolean, or both) or remains an operational practice
-  not modeled in the schema is a downstream decision. The architecture
-  commits to performed_by and paid_by; claimant-attendance is additive
-  and operational, orthogonal to both axes.
-- Inspection requester (who asked for the inspection). Whether the
-  requester axis — warrantor-initiated vs claimant-initiated — is
-  captured as a structured data point on inspections (e.g., a
-  requested_by column, a claimant_initiated boolean), or remains
-  operational practice not modeled in the schema, is a downstream
-  decision. The architecture commits to performed_by and paid_by;
-  requester is additive and operational, a third orthogonal axis the
-  shell does not lock.
+- Claimant attendance (Joint Inspection posture). Resolved by
+  Decision 18.1 as a non-feature at the schema level. Tenants who
+  operationally care can capture claimant attendance in
+  inspection_report JSONB per inspection. The architecture commits
+  to performed_by and paid_by; claimant-attendance is not modeled
+  as a structured column.
+- Inspection requester (who asked for the inspection). Resolved by
+  Decision 18.2: the requester axis is captured by inspection_trigger
+  (Decision 17), not by a separate requested_by column. The WHO
+  question is answered by reading the trigger value (Customer Request
+  implies claimant-initiated; Third Party implies external-party-
+  initiated; the remaining trigger values imply warrantor-initiated).
 
 ### Clock event interactions (open)
 
@@ -2781,9 +2778,10 @@ Parallel to the deliberate-omissions lists elsewhere:
   entity tables (Work Authorization, work plans) where the dependencies
   surface. Audit Topic 11's framing was "the foundation costs little;
   the workflow comes later" — this section honors that.
-- No claimant-attendance columns. Flagged above as a downstream question
-  orthogonal to the two locked axes.
-- No requester columns. Flagged above as a third downstream axis.
+- No claimant-attendance columns. Resolved as non-feature by Decision
+  18.1; operational tracking via inspection_report JSONB if needed.
+- No separate requester columns. Per Decision 18.2, the requester
+  signal is captured by Decision 17's inspection_trigger enum.
 - No UI mechanics. Whether inspection requests originate from a Six
   Gates review interface, a dedicated inspections queue, or somewhere
   else is UI design, not architecture.
