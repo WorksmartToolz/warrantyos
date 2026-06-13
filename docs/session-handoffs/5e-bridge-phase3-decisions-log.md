@@ -1226,7 +1226,147 @@ drafted in a future session, will define its own schema.
   explicit Parts Claims scope-boundary item per 16.3.
 
 ---
+---
 
+## Decision 18: Inspections Schema Axes — Claimant Attendance and Requester (resolved as non-features)
+
+**Decided in Session 5g (Decision 17 pre-triage).**
+
+### Context
+
+The committed Inspections Foundation section (commit e846e2c) flagged
+two architectural questions as "downstream decisions" beyond the locked
+performed_by and paid_by axes:
+
+1. Claimant attendance ("Joint Inspection" posture). Whether
+   claimant-invitation or claimant-attendance is captured as structured
+   data on inspections.
+2. Inspection requester (who asked for the inspection). Whether the
+   requester axis is captured as a separate column or boolean.
+
+Both were Cat 3 backlog items (#5 and #6 in the eleven-item Cat 3 list)
+flagged for downstream resolution. Pre-triage before Decision 17's
+Inspections Expansion work revealed both have clean resolutions that
+should land before Decision 17 proceeds so the Inspections schema work
+in Decision 17 has these axes already settled.
+
+### Question
+
+Should the inspections schema capture (a) claimant invitation and/or
+attendance, and (b) the requester axis (who initiated the inspection)?
+Or do these remain operationally tracked without schema columns?
+
+### Resolution
+
+**Two locked commitments:**
+
+**18.1: Claimant attendance is NOT captured at the schema level.**
+
+The "Joint Inspection" framing is Terrasmart-specific terminology —
+most warrantors call this simply "Inspection." The invitation to the
+claimant is implicit (not formally extended through a tracked gesture)
+and claimant attendance is rare and operationally inconsequential to
+the warrantor. No downstream workflow reads claimant attendance to
+make decisions; cost allocation, authority routing, and reporting all
+operate without this signal.
+
+A tenant who operationally cares about tracking claimant attendance
+for specific inspections can capture this in inspection_report JSONB
+on a per-inspection basis. The platform does not add claimant-related
+columns (no claimant_invited, no claimant_attended, no
+joint_inspection boolean).
+
+This resolves the Cat 3 #5 question.
+
+**18.2: Requester axis is captured by inspection_trigger, NOT a
+separate column.**
+
+The WHO question (who requested the inspection) is answered by reading
+the inspection_trigger value. Each trigger value implies a requester:
+
+- Customer Request implies claimant-initiated
+- Third Party implies external-party-initiated (vendor, insurer, etc.)
+- Internal Review, Warranty Claim, Preventative / Condition Assessment,
+  Repeat Condition Verification, Post-Remediation Verification, and
+  Failure Investigation all imply warrantor-initiated
+
+This subsumes the Cat 3 #6 requester axis question into Decision 17's
+inspection_trigger enum work. The Decision 17 work adds Third Party
+to the default set of trigger values explicitly to ensure
+external-party-initiated inspections have a coherent default value to
+record under.
+
+No separate requested_by column, no separate claimant_initiated
+boolean. The architecture commits to performed_by and paid_by as the
+two structural axes; inspection_trigger captures the operational
+reason AND the implicit requester in one column.
+
+This resolves the Cat 3 #6 question.
+
+### Architectural implications for Decision 17
+
+Decision 17's inspection_trigger enum's default set MUST include
+"Third Party" as the eighth value so external-party-initiated
+inspections have a coherent default to record under. The enum's
+default set is therefore (subject to Decision 17's tenant-editable
+defaults pattern work):
+
+1. Warranty Claim
+2. Customer Request
+3. Repeat Condition Verification
+4. Post-Remediation Verification
+5. Failure Investigation
+6. Preventative / Condition Assessment
+7. Internal Review
+8. Third Party (added by this Decision)
+
+Decision 17 may or may not add sub-flavors of Third Party (Vendor
+Request, Insurer Request, etc.) — current architectural commitment
+is a single Third Party value, with tenants free to add sub-flavors
+through the tenant-editable defaults mechanism if their operational
+reality requires.
+
+### Schema sketch
+
+No new schema columns. The inspections table retains its currently-
+committed schema (id, tenant_id, claim_id, performed_by, paid_by,
+status, inspection_report, created_at, updated_at) with Decision 17's
+work adding inspection_type, inspection_trigger, and revised
+inspection_status separately.
+
+### Cross-entity dependencies
+
+None new. Decision 18 confirms architectural commitments that align
+with the already-committed Inspections Foundation section's locked
+axes (performed_by, paid_by).
+
+### Open architectural questions deferred
+
+- **Sub-flavors of Third Party trigger.** Whether Third Party splits
+  into Vendor Request, Insurer Request, or other sub-flavors as
+  default values is deferred. Current commitment is single Third
+  Party value; tenants can add sub-flavors via tenant-editable
+  defaults mechanism per Decision 17.
+
+### Decision implications for already-committed sections
+
+**Inspections Foundation section (commit e846e2c) requires text
+revision in two subsections:**
+
+1. **"What is NOT in the inspections foundation" subsection.** The
+   two bullets that frame claimant attendance and requester as
+   "Flagged above as a downstream question" need revision to frame
+   them as decided non-features per this Decision.
+
+2. **"Outstanding architectural questions" subsection.** The two
+   bullets covering claimant attendance and inspection requester
+   currently say "is a downstream decision." Both need revision to
+   reference this Decision as the resolution.
+
+Section revision lands in the same session as Decision 18's commit
+to keep architecture and decisions log in sync.
+
+---
 ## Future decisions
 
 Decisions 17+ will be appended above this section as triage-and-resolve
