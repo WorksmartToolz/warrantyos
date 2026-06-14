@@ -1226,6 +1226,349 @@ drafted in a future session, will define its own schema.
   explicit Parts Claims scope-boundary item per 16.3.
 
 ---
+
+## Decision 17: Tenant-Editable Defaults Pattern (formalized as new Tier 1 platform pattern) and application to Inspections
+
+**Decided in Session 5h (Path C — chat 4 verified scope).**
+
+### Context
+
+Surfaced mid-drafting of Work Plan Workflow (Session 5f) when Andre
+identified that the currently-committed Inspections Foundation
+section's 4-value platform-locked status enum (requested, scheduled,
+in_progress, completed) does not reflect enterprise-level operational
+workflow. The proposed remediation extended to three new Inspections
+enums (inspection_type, inspection_trigger, inspection_status) with
+platform-provided defaults that tenants can edit.
+
+Decision 17's pre-session scope note (committed in 5f2934e) identified
+that "tenant-editable defaults" was potentially a new Tier 1 platform
+pattern beyond v2's existing platform-locked enums and tenant-defined
+JSONB/templates. Reserve Forecasting scope note (committed in f8d5e2f)
+later identified calculation parameters as a second canonical use of
+the same pattern.
+
+Chat 4 verification at Session 5h opening confirmed Path C: formalize
+the pattern as a new Tier 1 platform pattern rather than treating it
+as an Inspections-specific configuration mechanism.
+
+Pre-triage Decision 18 (Session 5g) resolved Cat 3 #5 and #6.
+Decision 18.2 established that inspection_trigger requires "Third
+Party" as the eighth default value.
+
+### Question
+
+What is the architectural shape of the Tenant-Editable Defaults Pattern
+as a Tier 1 platform pattern, and how does it apply to the three
+Inspections enums?
+
+### Resolution
+
+Two major sub-sections: Part A formalizes the pattern; Part B applies
+it to Inspections.
+
+### Part A: Tenant-Editable Defaults Pattern formalization
+
+**Nine architectural commitments establish the pattern.**
+
+**17.A.1: Per-enum lookup tables.** The pattern uses per-enum lookup
+tables (one table per tenant-editable enum), not a polymorphic-with-
+discriminator table. Each lookup table follows the same structural
+convention, parallel to internal_teams (Decision 13). Operational
+tables reference their lookup table via typed FK.
+
+**17.A.2: Hybrid FK + denormalized value snapshot on operational
+tables.** Operational tables carry BOTH an FK to the lookup table AND
+a denormalized value snapshot column. The FK provides database-
+enforced referential integrity; the snapshot column preserves the
+value at row creation time for cross-tenant reporting and audit-
+defensibility. The sync invariant is application-layer enforced,
+matching the FK + Snapshot Pattern's established convention.
+
+**17.A.3: Platform seeds at provisioning; tenants own forever after.**
+Platform default values are seeded into a tenant's lookup tables at
+tenant provisioning time. After provisioning, tenants own their
+lookup tables completely. The platform has NO propagation, opt-in,
+or force mechanism that affects existing tenants' lookup data.
+Platform code and infrastructure updates operate on the platform
+layer and do not intersect with tenant lookup table data.
+
+**17.A.4: Two columns: platform-canonical value + tenant-editable
+label.** Each lookup table has a value column (platform-canonical
+identifier, snake_case, lowercase; tenants cannot edit for non-
+tenant-added rows) and a label column (tenant-displayed name; freely
+editable subject to lock_tier restrictions). Operational tables
+denormalize the value (not the label) per 17.A.2. Tenant-added
+custom values get an auto-generated value via slugification of the
+label.
+
+**17.A.5: Three-category model via lock_tier discriminator.** The
+lookup tables carry a lock_tier text column with CHECK constraint:
+
+- platform_locked: platform commits to this value as canonical;
+  tenants CANNOT rename or soft-delete. Tenants CAN disable per
+  17.A.7.
+- platform_seeded: platform provides as starting point; tenants CAN
+  rename and disable; tenants CANNOT soft-delete.
+- tenant_added: full tenant control (rename, disable, soft-delete
+  all allowed).
+
+**17.A.6: Application-layer validation with migration-readiness to
+trigger enforcement.** Defense-in-Depth at v1 launch uses
+application-layer validation in Server Actions plus minimal DB CHECK
+constraints. No PostgreSQL triggers at v1. Migration readiness to
+trigger-based enforcement is preserved through five architectural
+commitments:
+
+1. Single canonical validation function (all tenant-editable
+   defaults reference validation lives in one helper).
+2. Single canonical validation rule (row exists AND tenant_id
+   matches AND disabled_at IS NULL AND deleted_at IS NULL AND
+   lock_tier permits the operation).
+3. Schema design supports trigger mode natively (lookup tables'
+   columns are in their final shape from v1).
+4. Test infrastructure tests the validation rule consistently.
+5. Operational logging surfaces validation failures consistently.
+
+The future migration from application-layer to trigger enforcement
+is a pure DB-layer change: add trigger functions whose logic mirrors
+the canonical validation function. No application code changes. No
+schema changes. No data migration.
+
+**17.A.7: Disable and soft-delete semantics.**
+
+- disabled_at: tenant-disabled. Hides from new-entry dropdowns AND
+  from active admin list view. Historical operational records still
+  display the value normally. Applies to ALL lock_tiers (including
+  platform_locked).
+- deleted_at: soft-delete. Applies ONLY to tenant_added rows.
+
+Admin UI provides a "view disabled" surface so tenants can re-enable
+disabled values.
+
+**17.A.8: Lookup tables always present; admin UI visibility gated by
+feature flag for feature-gated capabilities.** Lookup tables are
+always present in the schema across all tenants regardless of feature
+flag state. Admin UI visibility is gated by the feature flag. Feature
+flag enable/disable is a pure flag operation with no schema
+migrations.
+
+**17.A.9: Canonical-text-value design constraint for platform-locked
+defaults.** Platform-locked default values seeded into per-tenant
+lookup tables MUST use the same canonical value string across all
+tenants. Per-tenant rows for the same platform-locked default have
+identical value column content. Platform-wide analytics queries
+filter by value, not by id. Tenant-added rows have tenant-specific
+value strings.
+
+### Pattern lookup table schema (canonical shape)
+
+    <enum_name>s
+      id            uuid PK
+      tenant_id     uuid NOT NULL FK -> tenants
+      value         text NOT NULL
+      label         text NOT NULL
+      lock_tier     text NOT NULL
+                    -- 'platform_locked' | 'platform_seeded' | 'tenant_added'
+      sort_order    integer NOT NULL DEFAULT 0
+      disabled_at   timestamptz nullable
+      deleted_at    timestamptz nullable
+                    -- applies ONLY to lock_tier = 'tenant_added'
+      created_at    timestamptz NOT NULL DEFAULT now()
+      updated_at    timestamptz NOT NULL DEFAULT now()
+
+All tenant-editable defaults lookup tables follow the Standard RLS
+Pattern's six steps.
+
+### Mixed-pattern entities: role-based decision tree
+
+When an entity has multiple enum-like columns, each column's pattern
+assignment is determined by its operational role:
+
+1. **Workflow-driver** (platform code branches on the value) ->
+   platform-locked CHECK enum
+2. **Structural axis** (values are universal and drive cost routing
+   or authority) -> platform-locked CHECK enum
+3. **Categorization** (values legitimately vary by tenant business)
+   -> Tenant-Editable Defaults Pattern (lookup table)
+4. **Ambiguous** -> default to platform-locked CHECK enum, with
+   documented intent to promote to tenant-editable if operational
+   pressure surfaces
+
+The asymmetry that drives rule 4: platform-locked-to-tenant-editable
+is a forward migration (feasible). Tenant-editable-to-platform-locked
+is a breaking change. Lean conservative; promote later as need is
+demonstrated.
+
+**Three additional constraints documented in the pattern:**
+
+- **Schema introspection overhead for mixed-pattern entities is
+  real.** Operators using generic tools face ergonomic cost. Future
+  engineers should add tenant-editable columns deliberately.
+- **Platform-wide reporting works only when canonical-text-value
+  constraint (17.A.9) is honored.**
+- **TypeScript exhaustiveness asymmetry reinforces role separation.**
+  Platform-locked enums give exhaustive type checking; tenant-editable
+  enums explicitly do NOT (they're data, not code-relevant).
+
+### Part B: Application to Inspections
+
+**Three architectural commitments apply the pattern to Inspections.**
+
+**17.B.1: inspection_types as tenant-editable defaults.** New lookup
+table inspection_types created. Four platform-locked default values:
+
+- value: warranty, label: Warranty, lock_tier: platform_locked
+- value: condition_assessment, label: Condition Assessment, lock_tier: platform_locked
+- value: remediation_verification, label: Remediation Verification, lock_tier: platform_locked
+- value: failure_investigation, label: Failure Investigation, lock_tier: platform_locked
+
+Tenants can add Category 3 (tenant_added) inspection types. Tenants
+cannot rename or soft-delete the four platform-locked defaults but
+CAN disable them per 17.A.7.
+
+The inspections table gains: inspection_type_id (FK to
+inspection_types) and inspection_type_value (snapshot of value).
+
+**17.B.2: inspection_triggers as tenant-editable defaults.** New
+lookup table inspection_triggers created. Eight platform-locked
+default values:
+
+- value: warranty_claim, label: Warranty Claim, lock_tier: platform_locked
+- value: customer_request, label: Customer Request, lock_tier: platform_locked
+- value: repeat_condition_verification, label: Repeat Condition Verification, lock_tier: platform_locked
+- value: post_remediation_verification, label: Post-Remediation Verification, lock_tier: platform_locked
+- value: failure_investigation, label: Failure Investigation, lock_tier: platform_locked
+- value: preventative_condition_assessment, label: Preventative / Condition Assessment, lock_tier: platform_locked
+- value: internal_review, label: Internal Review, lock_tier: platform_locked
+- value: third_party, label: Third Party, lock_tier: platform_locked
+
+The Third Party value is required by Decision 18.2. Tenants can add
+Category 3 (tenant_added) inspection triggers.
+
+The inspections table gains: inspection_trigger_id and
+inspection_trigger_value.
+
+**17.B.3: inspection_status is platform-locked CHECK enum, NOT
+tenant-editable defaults.** inspection_status is a workflow-driver
+enum. Per the role-based decision tree, workflow-driver enums use
+platform-locked CHECK enums, not the tenant-editable defaults
+pattern.
+
+The four platform-locked values (REPLACES the currently committed
+4-value enum):
+
+- open: inspection created, awaiting activity
+- in_progress: observations being captured
+- under_review: inspection results being reviewed
+- issued: documentation completed and released to customer
+
+No inspection_statuses lookup table is created.
+
+Migration mapping from old enum to new enum:
+- requested -> open
+- scheduled -> open
+- in_progress -> in_progress
+- completed -> under_review
+
+The new value 'issued' represents an operational state that did not
+exist in the old enum.
+
+### NCR terminology
+
+NCR (non-conformance report) is per-tenant terminology, not platform
+vocabulary. The 'issued' status value's platform-level semantic is
+"inspection results have been finalized and the resulting
+documentation has been released to the customer." Consistent with
+Decision 18.1 and Decision 13.4.
+
+### Mixed-pattern entity: Inspections is the first canonical example
+
+The inspections table is the first v2 entity with mixed enum-handling
+patterns. Five enum-like columns spanning three patterns:
+
+- performed_by: platform-locked CHECK, Structural axis
+- paid_by: platform-locked CHECK, Structural axis
+- inspection_type: Tenant-Editable Defaults, Categorization
+- inspection_trigger: Tenant-Editable Defaults, Categorization
+- inspection_status: platform-locked CHECK, Workflow-driver
+
+This becomes the reference example for the role-based decision tree.
+
+### Schema changes to inspections table
+
+New columns:
+- inspection_type_id uuid NOT NULL FK -> inspection_types(id)
+- inspection_type_value text NOT NULL (snapshot per 17.A.2)
+- inspection_trigger_id uuid NOT NULL FK -> inspection_triggers(id)
+- inspection_trigger_value text NOT NULL (snapshot per 17.A.2)
+
+Changed column:
+- status: REPLACES the committed 4-value enum (requested, scheduled,
+  in_progress, completed) with new 4-value enum (open, in_progress,
+  under_review, issued). CHECK constraint enforces new values.
+
+### Cross-entity dependencies
+
+- **Inspections Foundation section** (commit e846e2c, revised in
+  Session 5g via commit 065a72b): requires substantial revision to
+  reflect Decision 17. Schema changes, mixed-pattern documentation,
+  new lookup tables documented as canonical examples, role-based
+  decision tree framing. Section revision lands in a separate
+  commit following this Decision's commit.
+
+- **Customer Work Authorization section** (commit c8b674d): contains
+  a specific status-value reference: "Work Authorization with
+  customer_decision = 'approved' is required before the inspection's
+  status can advance from 'requested' to 'scheduled'." This becomes
+  stale post-Decision 17. The Customer Work Authorization section
+  requires targeted revision.
+
+- **Reserve Forecasting capability scope note** (commit f8d5e2f):
+  references "Decision 17's tenant-editable defaults pattern" as
+  the mechanism for calculation parameters. Reserve Forecasting
+  calculation parameters become the second canonical use of the
+  pattern.
+
+- **Feature Flag System (Phase 0 Item 18)**: 17.A.8 establishes that
+  tenant-editable defaults lookup tables for feature-gated
+  capabilities follow the "data always present; UI visibility gated"
+  pattern.
+
+### Open architectural questions deferred
+
+- **Performance characteristics of canonical validation helper at
+  scale.** Profile and optimize if performance becomes a concern.
+  Not anticipated as a v1 concern.
+
+- **Bulk operations on tenant-editable defaults.** A tenant bulk-
+  reconfiguring lookup tables may need batch Server Action support.
+  Phase 3 implementation detail.
+
+- **Sub-flavors of platform-locked defaults.** Tenants can add
+  sub-flavors via tenant_added rows. UI design for "create sub-flavor
+  of platform-locked default" is a Phase 3 UI design question.
+
+- **Cross-section pattern documentation.** A dedicated Tier 1 section
+  "Tenant-Editable Defaults Pattern" in the architecture reference is
+  required. The section's drafting is part of next session's work.
+
+### Decision implications for already-committed sections
+
+Three sections require revision following this Decision's commit:
+
+**1. Inspections Foundation section** (commit e846e2c, revised
+065a72b): substantial revision required.
+
+**2. Customer Work Authorization section** (commit c8b674d): targeted
+update to the specific status-value reference.
+
+**3. New section required: Tenant-Editable Defaults Pattern (Tier 1).**
+
+All three section revisions land in next session's work, not in
+this Decision's commit. The Decision's commit captures the
+architectural commitments; the section drafting follows.
+
 ---
 
 ## Decision 18: Inspections Schema Axes — Claimant Attendance and Requester (resolved as non-features)
