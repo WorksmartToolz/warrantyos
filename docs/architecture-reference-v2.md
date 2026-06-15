@@ -2536,71 +2536,80 @@ Parallel to the deliberate-omissions lists elsewhere:
 
 ## Inspections Foundation
 
-**Status: Designed at the shell level.** This section locks the inspections
-table foundation per Audit Topic 11's explicit "build the table now, build
-the UI later" framing. The schema, the two performer/payer enum columns,
-the status enum, and the inspection_report JSONB are settled. Audit Topic
-11 proposed a single type enum (internal | third_party | customer_paid)
-that conflated three orthogonal axes; Phase 3 design against operational
-reality surfaces a case the conflated enum cannot express (a customer-
-requested inspection where the warrantor performs and the warrantor is
-paid), so this section revises the audit's framing into separate columns
-for who performs and who pays. The audit's substance is preserved; the
-schema shape is updated. The operational workflow that uses these states
-— when an inspection is triggered, who has authority to move an inspection
-from requested to scheduled, how findings feed back into claim status,
-whether and how claimant attendance is modeled, whether the requester is
-modeled — is not in this section. Audit Topic 11 framed this as a
-foundation that costs little to build now and a lot to retrofit later;
-later Tier 3 sections (claim lifecycle, work plan workflow) settle the
-workflow specifics.
+**Status: Designed.** This section locks the inspections table foundation,
+with the architecture having evolved through several Phase 3 decisions.
+The schema (the five enum-like columns plus inspection_report JSONB),
+each column's pattern assignment, and the cross-entity dependencies are
+settled. Audit Topic 11 proposed a single type enum that conflated three
+orthogonal axes; initial Phase 3 drafting split it into separate
+performed_by and paid_by columns. Decision 17 Part B then added
+inspection_type and inspection_trigger as tenant-editable defaults (per
+the Tenant-Editable Defaults Pattern's Tier 1 specification) and
+replaced the original 4-value status enum with a new 4-value enum
+aligned with enterprise-level operational workflow. The inspections
+table is the first v2 entity with mixed enum-handling patterns and
+serves as the reference example for the role-based decision tree the
+Tenant-Editable Defaults Pattern specifies. Operational workflow
+specifics (when inspections are operationally triggered, how findings
+feed back into claim status, what authority each role has at each
+transition) are not in this section; later Tier 3 sections (claim
+lifecycle, work plan workflow) settle the workflow.
 
 Inspections are claim-level investigations into a defect's cause, scope,
 or fix. The warranty professional uses them when the information in a
 claim is insufficient to determine corrective actions, or when an
-Indistinct claim needs investigation before warranty determination. The
-SOPs reference "Joint Inspection" as a posture the warrantor may offer —
-extending a courtesy invitation for the claimant to attend the inspection
-as a transparency measure. The inspection proceeds whether or not the
-claimant actually attends; "joint" is not a separate kind of inspection
-and is not tied to any one performer/payer combination. It is orthogonal
-to both axes defined below — any combination of performer and payer may
-be jointly attended or not. v1's Six Gates also reference inspection at
-Gate 3 (Evidence Evaluation) and downstream.
+Indistinct claim needs investigation before warranty determination.
+v1's Six Gates also reference inspection at Gate 3 (Evidence Evaluation)
+and downstream. SOP-level terminology such as Joint Inspection (a
+courtesy posture some warrantors offer to invite claimants to attend
+the inspection as a transparency measure) is per-tenant operational
+practice, not architecturally modeled; claimant attendance is not
+captured as a structured schema column per Decision 18.1, and tenants
+who track it operationally do so in inspection_report JSONB.
 
 ### Schema
 
     inspections
-      id                    uuid PK
-      tenant_id             uuid NOT NULL FK -> tenants
-                            -- denormalized per Standard RLS Pattern
-      claim_id              uuid NOT NULL FK -> claims
-      performed_by          text NOT NULL
-                            -- 'warrantor' | 'third_party'
-                            -- CHECK constraint enforces allowed values
-      paid_by               text NOT NULL
-                            -- 'warrantor' | 'claimant' | 'third_party'
-                            -- CHECK constraint enforces allowed values
-      status                text NOT NULL DEFAULT 'requested'
-                            -- 'requested' | 'scheduled' | 'in_progress' |
-                            --   'completed'
-                            -- CHECK constraint enforces allowed values
-      inspection_report     jsonb nullable
-                            -- per-inspection findings, structured per
-                            -- inspection shape; null until findings are
-                            -- captured
-      created_at            timestamptz NOT NULL DEFAULT now()
-      updated_at            timestamptz NOT NULL DEFAULT now()
+      id                            uuid PK
+      tenant_id                     uuid NOT NULL FK -> tenants
+                                    -- denormalized per Standard RLS Pattern
+      claim_id                      uuid NOT NULL FK -> claims
+      performed_by                  text NOT NULL
+                                    -- 'warrantor' | 'third_party'
+                                    -- CHECK constraint enforces allowed values
+      paid_by                       text NOT NULL
+                                    -- 'warrantor' | 'claimant' | 'third_party'
+                                    -- CHECK constraint enforces allowed values
+      inspection_type_id            uuid NOT NULL FK -> inspection_types(id)
+      inspection_type_value         text NOT NULL
+                                    -- snapshot of inspection_types.value
+                                    -- captured at row creation per the
+                                    -- FK + Snapshot Pattern's convention
+      inspection_trigger_id         uuid NOT NULL FK -> inspection_triggers(id)
+      inspection_trigger_value      text NOT NULL
+                                    -- snapshot of inspection_triggers.value
+                                    -- captured at row creation per the
+                                    -- FK + Snapshot Pattern's convention
+      status                        text NOT NULL DEFAULT 'open'
+                                    -- 'open' | 'in_progress' |
+                                    --   'under_review' | 'issued'
+                                    -- CHECK constraint enforces allowed values
+      inspection_report             jsonb nullable
+                                    -- per-inspection findings, structured per
+                                    -- inspection shape; null until findings
+                                    -- are captured
+      created_at                    timestamptz NOT NULL DEFAULT now()
+      updated_at                    timestamptz NOT NULL DEFAULT now()
       -- CHECK / app-layer invariant: tenant_id matches the referenced
       -- claim's tenant_id
 
-The table follows the Standard RLS Pattern's six steps: tenant_id FK, RLS
-enabled, the standard tenant-scoped SELECT policy, service-role-only
-writes, the required grants. tenant_id is denormalized onto the inspection
-directly per the convention.
+The table follows the Standard RLS Pattern's six steps: tenant_id FK,
+RLS enabled, the standard tenant-scoped SELECT policy, service-role-only
+writes, the required grants. tenant_id is denormalized onto the
+inspection directly per the convention.
 
-A claim may have zero, one, or many inspections over its lifecycle. There
-is no UNIQUE constraint on claim_id — a single claim might involve
+A claim may have zero, one, or many inspections over its lifecycle.
+There is no UNIQUE constraint on claim_id — a single claim might involve
 multiple inspections (an initial internal inspection, then a third-party
 expert inspection if the first is inconclusive, for example).
 
@@ -2608,6 +2617,24 @@ ON DELETE behavior on the claim_id FK is not yet locked. The
 architectural parallel to other claim-child entities (RESTRICT, with
 soft-delete as the operational cleanup path) suggests the same restraint
 here, but the specific clause is a Phase 3 implementation detail.
+
+inspection_types and inspection_triggers are sibling lookup tables
+created per the Tenant-Editable Defaults Pattern's canonical lookup
+table schema. Each tenant has their own copy of each table, seeded at
+provisioning with the platform-locked defaults specified in Decision 17
+Part B (four default inspection_types: Warranty, Condition Assessment,
+Remediation Verification, Failure Investigation; eight default
+inspection_triggers including the Third Party value required by
+Decision 18.2). The inspections table references each lookup table via
+the FK + Snapshot integration the pattern documents: inspection_type_id
+and inspection_trigger_id provide database-enforced referential
+integrity to the lookup table; inspection_type_value and
+inspection_trigger_value snapshot the lookup row's value column at
+inspection row creation for cross-tenant analytics and
+audit-defensibility. ON DELETE behavior on the two FKs to the lookup
+tables is governed by the lookup tables' soft-delete semantics per the
+Tenant-Editable Defaults Pattern; hard-deletion is not an ordinary
+path.
 
 ### performed_by and paid_by: two orthogonal axes
 
@@ -2672,31 +2699,102 @@ shape.
 
 ### status: the inspection state machine
 
-The four status values are all architecturally meaningful:
+The four status values are platform-locked per the role-based decision
+tree (status is a workflow-driver enum that platform code branches on;
+tenant additions would create unknown states the platform's state
+machine doesn't know how to handle).
 
-- requested — the inspection has been initiated as a record but is not
-  yet scheduled. The default at row creation. Captures the warranty
-  professional's decision (or response to a claimant request) that an
-  inspection is needed but the logistics haven't been settled.
-- scheduled — a date and performing party are set. SOP 0 names
-  inspection scheduling as part of platform capability ("schedule and
-  coordinate inspections"). For warrantor-performed inspections this is
-  when the warrantor's team has a date; for third-party-performed, when
-  the external party has confirmed.
-- in_progress — the inspection is actively underway. The state exists
-  because some inspections span multiple days or sessions, and
-  downstream workflows (notifications, status displays, queue filters)
-  need to distinguish active inspections from those merely scheduled.
-- completed — findings are captured. The inspection_report JSONB is
-  typically populated at this transition, though the field is nullable
-  to support partial-completion edge cases that downstream operational
-  drafting may surface.
+- open — inspection created, awaiting activity. The default at row
+  creation. Captures the warranty professional's decision (or response
+  to a customer/third-party trigger) that an inspection is needed but
+  field work has not yet begun. open subsumes what the original enum
+  captured as 'requested' (record exists) and 'scheduled' (date set);
+  the new enum collapses the request-vs-schedule distinction because
+  operational state is the same — no field work has happened yet.
+- in_progress — observations being captured. Field work is actively
+  underway. Some inspections span multiple days or sessions; this
+  state captures the active-execution period regardless of session
+  count.
+- under_review — inspection results being reviewed. Field observations
+  have been captured and the warranty team is conducting internal
+  review. Documentation drafting and validation happen in this state.
+- issued — documentation completed and released to customer. Terminal
+  state for the happy path; the inspection's resulting documentation
+  has been finalized and delivered to the customer. Some tenant
+  vocabularies call this documentation a Non-Conformance Report (NCR);
+  the platform-level semantic is "inspection results have been
+  finalized and the resulting documentation has been released to the
+  customer" regardless of what the tenant calls the document.
+  Consistent with the platform's discipline of treating
+  tenant-specific terminology as per-tenant naming rather than
+  platform vocabulary (parallel to Decision 13.4's
+  Warranty FOS / Construction Support framing and Decision 18.1's
+  Joint Inspection framing).
 
-Unlike the Warranty Registration and Claim shell status columns — which
-v2 deliberately left under-specified at the architectural level — these
-four inspection states are locked, because each unlocks distinct
-downstream behavior and the audit's listing of all four is corroborated
-by SOP language on scheduling and capturing findings.
+State transitions: open -> in_progress when field work begins;
+in_progress -> under_review when observations are captured and ready
+for review; under_review -> issued when documentation is finalized and
+released. Backward transitions are not part of the architectural
+commitment at this layer; whether under_review can transition back to
+in_progress (e.g., review finds gaps requiring re-inspection), or
+whether issued can transition back to under_review (e.g., post-release
+dispute), is operational and downstream.
+
+Migration mapping from the original enum to the new enum (for any
+test data; no production tenants exist at v1):
+
+- requested -> open
+- scheduled -> open
+- in_progress -> in_progress
+- completed -> under_review
+
+The new value 'issued' represents an operational state that did not
+exist in the original enum. The original enum's 'completed' captured
+what is now 'under_review' (field work done, ready for review);
+'issued' captures the additional step of documentation finalization
+and customer release that the original enum did not model.
+
+This is a platform-locked CHECK enum, not a tenant-editable defaults
+lookup table. See the Mixed-pattern columns subsection below for the
+role-based reasoning behind this pattern choice.
+
+### Mixed-pattern columns: role-based reasoning
+
+The inspections table is the first v2 entity with multiple enum-like
+columns using different architectural patterns. Five enum-like columns
+span three patterns, each chosen per the role-based decision tree the
+Tenant-Editable Defaults Pattern specifies:
+
+- performed_by — platform-locked CHECK enum. Structural axis: values
+  (warrantor, third_party) are universal across all warrantor business
+  models and drive authority checks (which credentials apply to the
+  inspection).
+- paid_by — platform-locked CHECK enum. Structural axis: values
+  (warrantor, claimant, third_party) are universal and drive cost
+  recovery routing.
+- inspection_type — Tenant-Editable Defaults. Categorization: values
+  legitimately vary by tenant business and operational vocabulary.
+  Platform-locked defaults (Warranty, Condition Assessment,
+  Remediation Verification, Failure Investigation) cover canonical
+  types; tenants extend with their own categories as needed.
+- inspection_trigger — Tenant-Editable Defaults. Categorization:
+  values legitimately vary by tenant business. Platform-locked
+  defaults (eight values per Decision 17 Part B, including the Third
+  Party value required by Decision 18.2) cover canonical triggers;
+  tenants extend with their own.
+- inspection_status — platform-locked CHECK enum. Workflow-driver:
+  platform code branches on the value to drive the state machine,
+  gate transitions, and trigger conditional logic. Tenant additions
+  would create unknown states the platform doesn't know how to
+  handle.
+
+The pattern assignment per column is the role-based decision tree
+applied uniformly. The Tenant-Editable Defaults Pattern's
+"Mixed-pattern entities: role-based decision tree" subsection
+documents the mechanics; this section is the first canonical reference
+example. Future v2 entities with multiple enum-like columns follow the
+same per-column role-based reasoning rather than picking a uniform
+pattern across the entity.
 
 ### inspection_report: JSONB for per-shape variation
 
@@ -2733,9 +2831,9 @@ downstream sections:
   Indistinct claim presumably cannot commence until the ALA is signed
   (the SOPs' blocking-gate language about claim processing applies).
   The specific interaction — whether an inspection record exists in
-  requested state pre-ALA and advances to scheduled post-ALA, or whether
-  it cannot be created at all pre-ALA — is operational and is settled by
-  the Tier 3 claim lifecycle section in concert with the ALA System
+  open state pre-ALA and advances to in_progress post-ALA, or whether
+  it cannot be created at all pre-ALA — is operational and is settled
+  by the Tier 3 claim lifecycle section in concert with the ALA System
   section.
 - Custom field involvement. Inspections are not in Decision 3's Phase 1
   custom-field entity scope (projects, warranty_registrations, claims).
@@ -2759,36 +2857,42 @@ downstream sections:
 
 ### Clock event interactions (open)
 
-The scheduled status implies a future date, which suggests clock_events
-could fire reminders or notify of upcoming inspections. Whether this is
-actually wired — whether scheduled inspections insert clock_events rows
-for reminder firing, or whether reminders are derived at read time from
-the schedule date elsewhere — is not specified by Audit Topic 11.
-Flagged for downstream operational drafting. The Clock Event
-Infrastructure supports the addition of inspection-related event types
-without restructuring.
+Inspections may have associated future dates (planned start of field
+work, scheduled completion, follow-up reminders), which suggests
+clock_events could fire reminders or notify of upcoming activity.
+Whether this is actually wired — whether inspections insert
+clock_events rows for reminder firing, or whether reminders are
+derived at read time from date fields elsewhere — is not specified
+at this section's architectural level. Flagged for downstream
+operational drafting. The Clock Event Infrastructure supports the
+addition of inspection-related event types without restructuring.
 
 ### What is NOT in the inspections foundation
 
 Parallel to the deliberate-omissions lists elsewhere:
 
-- No scheduled_at column, no scheduled_party column, no findings column,
-  no recommendations column. All of this is operational detail that
-  lives inside inspection_report JSONB per shape, or in downstream
-  entity tables (Work Authorization, work plans) where the dependencies
-  surface. Audit Topic 11's framing was "the foundation costs little;
-  the workflow comes later" — this section honors that.
+- No granular scheduling, findings, or recommendation columns
+  (planned start date, scheduled party, findings detail, etc.). All
+  of this is operational detail that lives inside inspection_report
+  JSONB per shape, or in downstream entity tables (Work
+  Authorization, work plans) where the dependencies surface. Audit
+  Topic 11's framing was "the foundation costs little; the workflow
+  comes later" — this section honors that.
 - No claimant-attendance columns. Resolved as non-feature by Decision
   18.1; operational tracking via inspection_report JSONB if needed.
 - No separate requester columns. Per Decision 18.2, the requester
   signal is captured by Decision 17's inspection_trigger enum.
+- No inspection_statuses lookup table. inspection_status is a
+  platform-locked CHECK enum per the role-based decision tree
+  (Workflow-driver). It is not a tenant-editable defaults lookup
+  table. See the Mixed-pattern columns subsection for the reasoning.
 - No UI mechanics. Whether inspection requests originate from a Six
   Gates review interface, a dedicated inspections queue, or somewhere
   else is UI design, not architecture.
-- No cost-tracking columns. Cost tracking has its own Tier 3 section per
-  v1's Cost Tracking lifecycle stage; inspection costs feed that
-  section's schema (which reads paid_by to determine the cost recovery
-  path), they don't live here.
+- No cost-tracking columns. Cost tracking has its own Tier 3 section
+  per v1's Cost Tracking lifecycle stage; inspection costs feed that
+  section's schema (which reads paid_by to determine the cost
+  recovery path), they don't live here.
 
 ## Service Report Submission
 
