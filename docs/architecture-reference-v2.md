@@ -4112,8 +4112,9 @@ Real cross-entity dependencies, deferred or resolved:
 - Inspections (event reference). When event_type = 'inspection', the
   event_reference_id points to the inspections row. Work
   Authorization with customer_decision = 'approved' is required
-  before the inspection's status can advance from 'requested' to
-  'scheduled'. This resolves the cross-entity dependency the
+  before the inspection's field work can commence — operationally,
+  before the inspection's status advances from 'open' to
+  'in_progress'. This resolves the cross-entity dependency the
   Inspections Foundation section flagged operationally ("Customer
   Work Authorization before a site inspection commences"); the
   resolution is here, locked at the architectural layer.
