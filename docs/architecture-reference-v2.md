@@ -200,7 +200,7 @@ shape, separate storage.
 
 ### Where the pattern applies
 
-Four interaction surfaces use this pattern. All four are the same mechanism
+Six interaction surfaces use this pattern. All six are the same mechanism
 applied to different parties and tasks:
 
 - **Claim intake (customer-facing).** A customer files a claim through a
@@ -221,6 +221,27 @@ applied to different parties and tasks:
   is the mechanism, and Item 17's overdue-escalation handling (the
   `trigger_confirmation_overdue` clock event) backstops a buyer who never
   responds.
+- **Service report customer review (customer-facing).** When the warranty
+  professional accepts a submitted Service Report, the customer is notified
+  via a tokenized link to a focused review interface with three possible
+  actions: accept the report, dispute the report, or take no action.
+  Silence is structurally treated as acceptance ('the warrantor shall
+  consider the silence acceptance' per SOP 1); a three-day customer review
+  window backstops the no-action case.
+- **Customer Work Authorization (customer-facing).** For each on-site event
+  requiring physical presence at the customer's site (inspection, repair,
+  site visit), the customer receives a tokenized link to the Work
+  Authorization form. Approval requires a signature artifact (typed name +
+  acknowledgment checkbox). Per Decision 11, universal blocking-gate
+  behavior: no on-site activity proceeds without an approved Work
+  Authorization for that specific event.
+- **ALA signing (claimant-facing).** Per Decision 19, for claims with the
+  Indistinct outcome, the claimant receives a tokenized link to the ALA
+  document. The flow is two-step with atomic Accept-and-Signature: claimant
+  chooses Accept or Decline; if Accept, the signature step captures the
+  electronic signature in the same atomic Server Action write. Decline
+  triggers a per-tenant configurable warning and opens a configurable
+  recant window during which the warrantor can re-issue the ALA.
 - **Future stateless workflows.** The pattern is explicitly extensible. Any
   future interaction with a non-authenticated party — additional customer touch
   points, other third-party submissions — uses this same mechanism rather than a
@@ -233,7 +254,7 @@ independently, means the token mechanics (entropy, expiry, single-use
 consumption, the focused single-record interface) are decided once and reused.
 The alternative — each feature rolling its own link mechanism — risks
 inconsistent expiry handling, inconsistent consumption semantics, and a wider
-surface of one-off security decisions. One pattern, applied four-plus times,
+surface of one-off security decisions. One pattern, applied six-plus times,
 keeps the security-relevant mechanics uniform.
 
 ## Cache Invalidation Pattern
