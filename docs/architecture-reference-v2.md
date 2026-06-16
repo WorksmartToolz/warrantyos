@@ -2266,12 +2266,13 @@ Parallel to the deliberate-omissions lists in Tier 2:
 
 ## ALA System
 
-**Status: Designed at the architectural level.** ALA markup default and
-storage locked by Decision 7. ala_templates and ala_documents schemas
-follow Audit Topic 10's shape with the operational behavior the SOPs
-specify. Signature capture mechanism is flagged as an open architectural
-question — no locked source resolves it, and the choice has legal
-implications.
+**Status: Designed.** ALA markup default and storage locked by
+Decision 7. ala_templates and ala_documents schemas follow Audit Topic
+10's shape with the operational behavior the SOPs specify. Signature
+capture mechanism locked by Decision 19 — ten architectural commitments
+covering claimant decision capture, signature mechanism configurability,
+accessibility-compliant signing path, decline handling with recant
+window, and operational state machine.
 
 ALA stands for the Owner's Consent and Assumption of Liability Agreement.
 It is the document a claimant signs when a claim's causation or ownership
@@ -2384,7 +2385,52 @@ invariant is a Phase 3 implementation detail.
       signed_at                   timestamptz nullable
                                   -- null until the document is signed;
                                   -- non-null is the architectural marker
-                                  -- of "ALA in place"
+                                  -- of "ALA in force" (refined by
+                                  -- Decision 19's three-state model)
+      claimant_decision           text nullable
+                                  -- 'accepted' | 'declined'
+                                  -- CHECK constraint enforces values
+                                  -- application invariant: when
+                                  --   'accepted', signed_at must be
+                                  --   non-null (atomic per Decision 19.1)
+      decided_at                  timestamptz nullable
+                                  -- moment of Accept/Decline click;
+                                  -- non-null when claimant_decision is
+                                  -- non-null
+      decline_reason              text nullable
+                                  -- optional free-text context from
+                                  -- the claimant; only populated when
+                                  -- claimant_decision = 'declined'
+      signature_method            text NOT NULL
+                                    DEFAULT 'in_platform_widget'
+                                  -- 'in_platform_widget' |
+                                  --   'esignature_service'
+                                  -- CHECK constraint enforces values;
+                                  -- captured at row creation from the
+                                  -- tenant's ala_signature_method
+                                  -- setting and frozen for the
+                                  -- document's lifetime
+      signature_image_url         text nullable
+                                  -- URL reference to Supabase Storage
+                                  -- (tenant-scoped path); only
+                                  -- populated when signature_method =
+                                  -- 'in_platform_widget' AND canvas
+                                  -- sub-path used AND signed_at
+                                  -- non-null
+      esignature_envelope_id      text nullable
+                                  -- reference to e-signature service
+                                  -- envelope/document ID; only
+                                  -- populated when signature_method =
+                                  -- 'esignature_service' AND signed_at
+                                  -- non-null
+      claimant_token              text nullable
+                                  -- single-use token for the
+                                  -- tokenized signing link; per
+                                  -- Stateless Tokenized Interaction
+                                  -- Pattern's "shape to copy" rule,
+                                  -- stored on the document row rather
+                                  -- than in the invitations table
+      claimant_token_expires_at   timestamptz nullable
       created_at                  timestamptz NOT NULL DEFAULT now()
       updated_at                  timestamptz NOT NULL DEFAULT now()
       -- CHECK / app-layer invariant: tenant_id matches the referenced
@@ -2393,35 +2439,94 @@ invariant is a Phase 3 implementation detail.
 The table follows the Standard RLS Pattern. tenant_id is denormalized
 directly per the convention.
 
-UNIQUE on claim_id enforces that a claim has at most one ALA document. A
-claim either is Indistinct and has one ALA, or is not Indistinct and has
-none.
+UNIQUE on claim_id enforces that a claim has at most one ALA document.
+A claim either is Indistinct and has one ALA, or is not Indistinct and
+has none.
 
-content_snapshot is captured at document generation, not referenced live
-through template_id. This is the same defensibility logic as the FK +
-Snapshot Pattern: the document the claimant signed must read identically
-in twenty years even if the template was updated, retired, or
-restructured. The template_id FK preserves the relationship for
+content_snapshot is captured at document generation, not referenced
+live through template_id. This is the same defensibility logic as the
+FK + Snapshot Pattern: the document the claimant signed must read
+identically in twenty years even if the template was updated, retired,
+or restructured. The template_id FK preserves the relationship for
 reporting; the content_snapshot preserves the historical truth.
 
 markup_percent_snapshot is also captured at document generation, frozen.
-The current tenant ala_markup_percent reflects current configuration; the
-percent that applied to this specific document at the moment it was
-generated is what the claimant agreed to and what the audit trail must
-preserve. Same defensibility logic.
+The current tenant ala_markup_percent reflects current configuration;
+the percent that applied to this specific document at the moment it
+was generated is what the claimant agreed to and what the audit trail
+must preserve. Same defensibility logic.
 
 The signer fields (signer_name, signer_email, signed_at) are nullable
-because a document may exist as unsigned (sent to the claimant, awaiting
-response) before becoming signed. signed_at being non-null is the
-architectural marker that the agreement is in force.
+because a document may exist as unsigned (sent to the claimant,
+awaiting response) before becoming signed. signed_at being non-null
+remains the architectural marker that the agreement is in force —
+this commitment carries over from prior v2 and is refined by Decision
+19's three-state model: the in-force marker corresponds to the signed
+state (signed_at IS NOT NULL AND claimant_decision = 'accepted'); the
+unsigned state has both signed_at and claimant_decision null; the
+declined state has claimant_decision = 'declined' AND signed_at IS
+NULL. The signer columns capture WHO signed and WHEN; the decision
+columns capture WHAT they decided. The two sets of columns are
+complementary, not redundant.
 
-Whether to capture the signer as a free-text snapshot (name/email pair,
-as above) or as an FK + Snapshot reference to a contacts row is the same
-question Claim Intake settled for the submitter, with the same answer
-for the same reasons: a signer may be a customer contact or a one-off
-third party, the FK is too heavy for the operational shape, free-text
-snapshots are sufficient. If reporting needs surface that argue for FK +
-Snapshot, this is revisitable.
+Whether to capture the signer as a free-text snapshot (name/email
+pair, as above) or as an FK + Snapshot reference to a contacts row is
+the same question Claim Intake settled for the submitter, with the
+same answer for the same reasons: a signer may be a customer contact
+or a one-off third party, the FK is too heavy for the operational
+shape, free-text snapshots are sufficient. If reporting needs surface
+that argue for FK + Snapshot, this is revisitable.
+
+The decision capture columns (claimant_decision, decided_at,
+decline_reason) capture the claimant's Accept or Decline choice and
+its context per Decision 19.2. decided_at captures the click moment;
+signed_at captures the completed signature moment; in the happy path
+the two timestamps are near-identical because the atomic Accept-and-
+Signature commitment (Decision 19.1) requires both within a single
+Server Action write. The columns remain semantically distinct so
+downstream code can read whichever it needs.
+
+The signature mechanism columns (signature_method, signature_image_url,
+esignature_envelope_id) capture which signing mechanism produced the
+signature and any mechanism-specific artifact per Decision 19.3, 19.4,
+and 19.5. signature_method is captured at row creation from the
+tenant's ala_signature_method setting and frozen for the document's
+lifetime, so historical documents retain their mechanism even if the
+tenant changes the setting later. signature_image_url is populated
+only when the in_platform_widget canvas sub-path was used;
+esignature_envelope_id is populated only when signature_method =
+'esignature_service'.
+
+The token columns (claimant_token, claimant_token_expires_at) store
+the tokenized signing link per Decision 19.8 and the Stateless
+Tokenized Interaction Pattern's "shape to copy, not shared store"
+rule. The tokens live on the ala_documents row rather than in a
+shared invitations table, parallel to the token storage on
+work_authorization_documents (Decision 11). Per-row token
+regeneration handles expiry recovery — the warrantor can update both
+token columns on the existing row when a token expires; the
+document's state column combination (claimant_decision, signed_at) is
+preserved across regeneration.
+
+Application invariant: when claimant_decision = 'accepted', signed_at
+MUST be non-null. The atomic accept-and-signature commitment
+(Decision 19.1) means the Server Action commits Accept and Signature
+together as a single write; there is no valid row state where the
+claimant has accepted but not signed. The invariant is enforced at
+the application layer through the Server Actions that write these
+columns.
+
+signature_image_url storage convention: when the in_platform_widget
+canvas sub-path is used, the Server Action writes the canvas image
+data to Supabase Storage under a tenant-scoped path (typically
+something like tenant-{tenant_id}/ala-signatures/{document_id}.png;
+the exact path convention is a Phase 3 implementation detail). The
+resulting URL is stored in signature_image_url. The URL-reference
+convention aligns with platform patterns for other binary data
+(claim photos, service report photos, work authorization documents)
+and keeps backup, replication, and metadata-query performance
+efficient — bytea storage at this scale would inflate database
+backups, replication bandwidth, and TOAST overhead unnecessarily.
 
 ### ALA markup: 10%, stored at tenants.settings.ala_markup_percent
 
@@ -2455,66 +2560,180 @@ signature. The Server Action that creates the document is the trigger,
 not a clock event — same convention as registration creation on
 trigger_status confirmation.
 
-Whether the routing-for-signature uses the Stateless Tokenized
-Interaction Pattern, an in-app interface for a known claimant, or some
-other channel depends on the signature mechanism question (see below).
+The routing-for-signature uses the Stateless Tokenized Interaction
+Pattern per Decision 19 (ALA is the pattern's sixth canonical use).
+The claimant receives a tokenized email link to the ALA document,
+opens it, completes the Accept/Decline decision and (on Accept) the
+signature step within the same tokenized session. See the Signature
+capture mechanism subsection below for the locked architecture.
 
-### Signature capture: an open architectural question
+### Signature capture mechanism
 
-Audit Topic 10 flagged the signature mechanism as TBD between tokenized
-form acceptance and wet (physical) signature. None of the locked sources
-— Decision 7, Audit Topic 10, the SOPs that name the Indistinct workflow
-— resolves this. The SOPs say "signed" repeatedly without defining HOW;
-they reference the agreement without specifying how it gets signed.
+The signature capture mechanism is locked per Decision 19 (Phase 3
+decisions log) with ten architectural commitments. The previously
+open architectural question — tokenized form acceptance vs wet
+signature vs e-signature service — is resolved through a per-tenant
+configurable architecture with a sensible default and architectural
+support for future expansion. The existing schema columns
+(signer_name, signer_email, signed_at) retain their original
+semantics; eight new columns and three tenants.settings keys layer
+the locked mechanism on top.
 
-The question is real because the choice has legal implications. A
-tokenized form-acceptance — claimant clicks a link, reviews the agreement
-text, types their name or clicks "I Agree" — is operationally clean,
-audit-friendly through Stateless Tokenized Interaction Pattern, and
-preserves the entire interaction in the audit trail. Whether that
-constitutes legally enforceable signature for the Owner's Consent's
-purpose varies by jurisdiction and by the warrantor's contractual
-preferences. A wet signature path — claimant prints, signs, scans/uploads
-or mails back — is legally well-established but adds operational
-friction and a document-handling surface.
+The signing flow is two-step with atomic Accept-and-Signature. Step
+one captures the claimant's Accept or Decline decision. Step two, on
+Accept only, captures the electronic signature. The two steps are
+atomic: a claimant who clicks Accept MUST complete the signature in
+the same flow before the decision is recorded. The Server Action
+commits Accept and Signature together as a single atomic write or
+commits neither. A claimant who abandons during signature (browser
+closes, network fails, distraction) leaves no captured state.
+Decline is the only single-step terminal action; no signature follows.
 
-A third path is also possible: an electronic signature service (DocuSign,
-HelloSign, Adobe Sign) with established legal standing. None of the
-locked sources mention this, but it bridges the two extremes.
+Decision capture lives in three columns: claimant_decision (the
+'accepted' or 'declined' value), decided_at (timestamp of the
+Accept/Decline click), and decline_reason (optional free-text context,
+populated only when claimant_decision = 'declined'). decided_at
+captures the click moment; signed_at captures the completed signature
+moment. In the happy path the two timestamps are near-identical
+because the steps are atomic; the columns remain semantically distinct
+so downstream code can read whichever it needs.
 
-The architectural commitment v2 makes: the ala_documents schema supports
-any of these mechanisms — signer_name, signer_email, and signed_at are
-generic enough to capture the outcome of any signing process. The
-question of WHICH mechanism is settled by a future decision, and that
-decision may need to be per-tenant (warrantors operating under different
-contracts or in different jurisdictions may need different mechanisms).
-Flagged as outstanding architectural question; no improvised resolution.
+The operational state machine is three states derived from the
+combination of claimant_decision and signed_at. unsigned: signed_at
+IS NULL AND claimant_decision IS NULL — document sent, awaiting
+response. signed: claimant_decision = 'accepted' AND signed_at IS
+NOT NULL — ALA in force, blocking-gate cleared, claim can advance
+from Indistinct. declined: claimant_decision = 'declined' AND
+signed_at IS NULL — claimant explicitly declined; pending the
+decline-recant window (below), becomes permanently terminal after
+window expiry. There is no accepted_unsigned intermediate state;
+the atomic-accept-and-signature commitment eliminates that
+possibility.
 
-### Blocking-gate behavior
+Signature mechanism is per-tenant configurable. Configuration lives
+at tenants.settings.ala_signature_method with two valid values:
+'in_platform_widget' (the v1 default) and 'esignature_service'.
+Configuration storage shape parallels Decision 7's
+tenants.settings.ala_markup_percent — single per-tenant scalar
+value with application-layer validation. The Server Action handling
+document creation reads the tenant's current setting and applies it
+as the document's signature_method column at row creation; the
+column preserves the mechanism for the lifetime of each document
+even if the tenant changes the setting later.
 
-The SOPs are clear and stronger than Audit Topic 10's summary on this
-point. Audit Topic 10 described the ALA as blocking Work Plan workflow.
-The SOPs say the ALA blocks the *claim* from proceeding to investigation,
-not just Work Plan downstream. SOP 1 (Accepted Warranty Claim Lifecycle):
-the ALA "must be signed before the processing and investigation of the
-claim can begin." SOP 0 (Warranty Management System Capabilities): the
-Indistinct Claims "process will only commence following the receipt and
-acceptance of the signed agreement." SOP 4 (Claim Submission
-Requirements): "before [Company Name Here] will proceed."
+The in_platform_widget mechanism has TWO sub-paths within the same
+signature_method enum value, both producing valid signed ALAs. The
+canvas-based sub-path presents a draw-your-signature interface,
+captures the result as image data, and stores it in Supabase Storage
+under a tenant-scoped path with the URL reference recorded in
+signature_image_url. The typed-name-plus-checkbox fallback sub-path
+mirrors Customer Work Authorization's signature mechanism (Decision
+11): the claimant types their name and checks an "I sign" or
+equivalent acknowledgment box. The acknowledgment checkbox replaces
+the canvas image as the binding artifact; signature_image_url stays
+null on this sub-path. Both sub-paths populate signer_name,
+signer_email, and signed_at identically. The Server Action layer is
+responsible for ensuring the in_platform_widget UI surface offers
+both sub-paths; the dual-path commitment is not optional —
+accessibility compliance (ADA and equivalent regulations) requires
+the typed-name fallback within the default path for claimants using
+assistive technology, motor impairments, or other accessibility
+needs the canvas sub-path cannot accommodate.
 
-The blocking relationship is locked architecture: a claim whose outcome
-is Indistinct cannot move forward — neither to investigation nor to work
-plan nor to anything downstream — until its ala_documents row exists and
-has signed_at non-null. The Server Actions that would otherwise advance
-the claim must check for this and refuse the advance if the gate is not
-cleared.
+Signature image storage uses a URL reference to Supabase Storage,
+not bytea on the database row. The convention aligns with platform
+patterns for other binary data (claim photos, service report photos,
+work authorization documents) and decouples large-blob storage from
+document metadata queries — TOAST overhead, backup inflation, and
+replication bandwidth all stay efficient. The Server Action writes
+canvas data to Supabase Storage and records the resulting URL on
+the document.
 
-The specific claim-status values that interact with this gate — what
-status the claim is in while awaiting signature, what status it moves to
-on signing, how this composes with the rest of the Six Gates flow — are
-operational state-machine details that the Tier 3 claim lifecycle section
-settles. The architectural commitment is the blocking relationship
-itself; the state-machine particulars are downstream.
+The esignature_service mechanism is architecturally supported at v1
+but no actual service integration is built. The signature_method
+enum includes 'esignature_service' as a valid value, and the
+esignature_envelope_id column captures the service-specific
+reference when populated. A tenant who configures
+tenants.settings.ala_signature_method = 'esignature_service' will
+encounter a "not yet supported" error from the Server Action layer
+when attempting to send an ALA for signing. Which specific service(s)
+the platform integrates with (DocuSign, HelloSign, Adobe Sign, etc.)
+is deferred to a future Decision when operational pressure surfaces.
+The architectural commitment is the configurability; the integration
+work is downstream. signer_name and signer_email semantics by
+signature_method: in_platform_widget captures signer_name from the
+canvas widget's name input (canvas sub-path) or the typed-name input
+(fallback sub-path), with signer_email from the tokenized session;
+esignature_service captures both fields from the service's response
+callback.
+
+Decline triggers a warning to the claimant AFTER commit, not as a
+pre-commit confirmation. The Server Action records the decision
+immediately (claimant_decision = 'declined', decided_at = now()) and
+the outcome screen displays a warning explaining the consequence: the
+warrantor cannot proceed with the claim, and the claim is subject to
+denial. Warning text is per-tenant configurable at
+tenants.settings.ala_decline_warning_text, with platform default
+seeded at provisioning and application-layer validation enforcing
+NOT NULL plus 50-500 character bounds. Storage shape parallels
+Decision 7's ala_markup_percent. The Tenant-Editable Defaults Pattern
+is deliberately NOT used for the warning text — that pattern fits
+enum-like data with multiple values, and a single per-tenant
+configurable string fits the tenants.settings convention.
+
+Decline is NOT immediately permanently terminal. A configurable
+window opens from decided_at during which the claimant can recant
+their decline (typically by emailing the warrantor) and the warrantor
+can re-issue the same ALA for another acceptance attempt. Window
+duration lives at tenants.settings.ala_decline_recant_window_days
+with platform default of 3 days and application-layer validation
+bounds of 1-30 days. Storage shape parallels Decision 7's
+ala_markup_percent. During the window, a warrantor-invoked re-issue
+Server Action verifies the document is in declined state and the
+current time is within the window, writes an audit trail entry
+capturing the decline event (who declined, when, decline_reason),
+resets claimant_decision and decided_at and decline_reason to NULL,
+regenerates claimant_token and claimant_token_expires_at, and
+re-sends the tokenized link. The document state returns to unsigned
+and the claimant has full Accept/Decline path available again. After
+window expiry the re-issue Server Action is blocked; if the claimant
+later recants outside the window they must resubmit the claim
+entirely. A new clock_event type ala_decline_window_expired fires
+at decided_at + ala_decline_recant_window_days days when
+claimant_decision = 'declined'; the event marks the decline as
+permanently terminal and unblocks downstream claim denial workflow.
+This is the seventh clock_event type after Decision 9's six. ALA's
+recant-window mechanic handles the most common case (hasty decline
+reconsidered within days) without committing to a fuller
+revise-and-resend mechanic parallel to Customer Work Authorization
+(Decision 11); the broader revise-and-resend question is flagged as
+deferred for future Decision if operational pressure surfaces.
+
+ALA is the sixth canonical use of the Stateless Tokenized Interaction
+Pattern, after claim intake, registration assignee submission,
+supply-only delivery reporting, service report customer review, and
+Customer Work Authorization. The claimant is a non-authenticated
+party receiving a tokenized email link to the ALA document; they
+open it, complete the Accept/Decline decision and (on Accept) the
+signature step within the same tokenized session. Per the pattern's
+"shape to copy, not shared store" rule, two columns on ala_documents
+store the token: claimant_token (the token value) and
+claimant_token_expires_at (the expiry timestamp). Per-row token
+regeneration is the mechanic for expiry recovery — the warrantor can
+update both columns on the existing ala_documents row when the token
+expires; document state is preserved across regeneration. Token
+regeneration is distinct from the decline-recant re-issue: token
+expiry on an unsigned document is a transient-availability concern;
+decline-recant re-issue is the state-reset path post-decline. Both
+mechanics co-exist.
+
+Counter-signature is deliberately absent. The ALA is authored by the
+warrantor and the operative event is claimant acceptance; the
+warrantor's role is implicit in the Server Action that creates the
+document. This is architecturally correct for an Owner's Consent and
+Assumption of Liability Agreement — the document captures one-sided
+consent from the claimant; no counter-signing column is needed and
+none is added.
 
 ### What is NOT in the ALA system
 
