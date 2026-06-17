@@ -4326,6 +4326,21 @@ tokenized link per the Stateless Tokenized Interaction Pattern's
 "shape to copy, not shared store" rule: each authorization's token
 lives on its own document row rather than in the invitations table.
 
+O&M Provider approval of a Customer Work Authorization is BLOCKED at
+v1 per Decision 20.6 and 20.7. The approving party must be the
+customer directly. Even when the customer has engaged an O&M Provider
+as their authorized agent for warranty matters, the binding-commitment
+nature of Work Authorization approval (the customer authorizing
+specific on-site activity at their site) requires the Customer-O&M
+Authorization document as a precondition. That document is deferred
+to Cat 3 #9 (Customer-O&M Authorization document architecture). Until
+Cat 3 #9 lands, the Work Authorization Server Action verifies the
+actor's contact_type and BLOCKS approval attempts where actor
+contact_type IN ('om_provider', 'om_provider_contact') with a
+"O&M Provider binding-commitment agency is not yet supported" error.
+Tenants who require O&M Provider Work Authorization approval must
+wait for Cat 3 #9 to land.
+
 ### State machine on status
 
 The status column transitions through seven values enforcing the
