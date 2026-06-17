@@ -2115,8 +2115,19 @@ or tenant.
                                     -- are providing; shape flagged below
       detailed_description          jsonb NOT NULL
                                     -- rich text, ProseMirror-compatible JSON
+      submitter_contact_id          uuid nullable FK -> contacts
+                                    -- per Decision 20: FK + Snapshot when
+                                    --   submitter is a known contact;
+                                    --   null when submitter is a one-off
+                                    --   third party not in the directory
       submitter_name                text NOT NULL
+                                    -- snapshot captured at submission;
+                                    --   populated regardless of whether
+                                    --   submitter_contact_id is set
       submitter_email               text NOT NULL
+                                    -- snapshot captured at submission;
+                                    --   populated regardless of whether
+                                    --   submitter_contact_id is set
       ship_to_street                text
       ship_to_city                  text
       ship_to_state                 text
@@ -2325,15 +2336,21 @@ what's still open:
   consistency. Whether this is the right level of structure or whether the
   project's address pattern itself needs revision (geocoding, international
   formats) is a future decision, not raised by any locked source.
-- Claimant identity (the submitter). The Tier 2 shell flagged this; the
-  workbook gives narrow data (name + email only). The hard columns above
-  capture submitter_name and submitter_email directly, treating the
-  submitter as a free-text capture per claim rather than a contact
-  reference. The proposal is to keep it that way: a submitter is sometimes
-  a customer contact and sometimes a one-off third party, FK + Snapshot
-  may be too heavy for the operational shape, and free-text snapshots may
-  be enough. If reporting or reuse needs surface that argue for FK +
-  Snapshot, this is revisitable.
+- Claimant identity (the submitter). Per Decision 20, the submitter
+  capture uses FK + Snapshot when the submitter is a known contact, with
+  free-text fallback for one-off third parties. The hard columns capture
+  submitter_contact_id (nullable FK to contacts), plus submitter_name and
+  submitter_email (NOT NULL, snapshot at submission). When
+  submitter_contact_id is populated, downstream workflows can traverse to
+  the contact's contact_type to derive whether the submission was by the
+  customer directly, by a customer_contact, by an O&M Provider (subject
+  to Decision 20.6's INFORMATIONAL vs BINDING-COMMITMENT carving), or by
+  another party type. When submitter_contact_id is null, the snapshot is
+  the only record; agency role cannot be derived because there is no
+  contact reference. This shape resolves the chat-4-identified
+  traceability gap in Decision 20.4 (downstream workflows that need to
+  know "was this claim filed by an authorized agent or by the customer
+  directly?" can answer reliably when the submitter is a known contact).
 - Foundation Issue Type sub-dropdown values. Workbook 1 lists the field
   but not its values. The values themselves are operational content (which
   Foundation issues a warrantor distinguishes), not architecture. Flagged
