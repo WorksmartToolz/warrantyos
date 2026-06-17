@@ -2313,11 +2313,13 @@ what's still open:
   Name, Contact Name, Email, and Phone — the exact shape of a Unified
   Contacts Directory contact. The architecturally consistent answer is the
   FK + Snapshot Pattern's single-FK shape: an om_provider_contact_id FK to
-  contacts with name/email/phone snapshots captured at intake. The
-  contact_type for the FK is the open question — Item 16's eight Phase 1
-  values include subcontractor_contact, which could fit, but a dedicated
-  om_provider value may be cleaner. Resolving the contact_type is a
-  downstream decision.
+  contacts with name/email/phone snapshots captured at intake. Per Decision
+  20.1, the contact_type for the FK is `om_provider_contact` (the
+  individual at the O&M Provider organization who provided the contact
+  info), with parent_contact_id traversing to the parent `om_provider`
+  organization contact (per Decision 20.10's matched-pair traversal
+  mechanism). The dedicated om_provider value is the cleaner answer this
+  flag identified.
 - Ship-to address structure. The hard columns above use four scalars
   (street/city/state/zip) following the project's site_address pattern for
   consistency. Whether this is the right level of structure or whether the
