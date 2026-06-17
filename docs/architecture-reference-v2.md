@@ -2844,6 +2844,20 @@ Assumption of Liability Agreement — the document captures one-sided
 consent from the claimant; no counter-signing column is needed and
 none is added.
 
+O&M Provider acceptance of an ALA is BLOCKED at v1 per Decision 20.6
+and 20.7. The signing party must be the customer (claimant) directly.
+Even when the customer has engaged an O&M Provider as their authorized
+agent for warranty matters, the binding-commitment nature of an ALA
+(the customer accepting financial responsibility for investigation if
+the defect falls outside warranty scope) requires the Customer-O&M
+Authorization document as a precondition. That document is deferred
+to Cat 3 #9 (Customer-O&M Authorization document architecture). Until
+Cat 3 #9 lands, the ALA Server Action verifies the actor's contact_type
+and BLOCKS acceptance attempts where actor contact_type IN
+('om_provider', 'om_provider_contact') with a "O&M Provider binding-
+commitment agency is not yet supported" error. Tenants who require
+O&M Provider ALA acceptance must wait for Cat 3 #9 to land.
+
 ### What is NOT in the ALA system
 
 Parallel to the deliberate-omissions lists elsewhere:
