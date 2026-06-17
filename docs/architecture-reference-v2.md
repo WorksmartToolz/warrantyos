@@ -3529,6 +3529,25 @@ matters for "did the customer affirmatively accept or did they go
 silent") without committing the rest of the system to a structural
 distinction.
 
+O&M Provider customer-side review (explicit acceptance or dispute) of
+a Service Report is BLOCKED at v1 per Decision 20.6 and 20.7. The
+reviewing party must be the customer directly. Even when the customer
+has engaged an O&M Provider as their authorized agent for warranty
+matters, the binding-commitment nature of customer-side review (the
+customer accepting or disputing the warrantor's assertion that the
+repair is complete, which closes or contests the claim) requires the
+Customer-O&M Authorization document as a precondition. That document
+is deferred to Cat 3 #9 (Customer-O&M Authorization document
+architecture). Until Cat 3 #9 lands, the Service Report Server Action
+verifies the actor's contact_type and BLOCKS explicit acceptance and
+dispute submissions where actor contact_type IN ('om_provider',
+'om_provider_contact') with a "O&M Provider binding-commitment agency
+is not yet supported" error. The silence-acceptance path
+(Assumption of Acquiesce) operates independently of actor identity —
+it fires on the clock event regardless of who could have responded.
+Tenants who require O&M Provider Service Report review must wait for
+Cat 3 #9 to land.
+
 ### The three-day window: a new clock event type
 
 The three-day customer review window is a future-firing deadline. The
