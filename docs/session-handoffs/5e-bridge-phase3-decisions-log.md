@@ -2980,6 +2980,519 @@ platform convention for three-day claimant response windows.
 Remaining Cat 3 backlog: eight items (down from nine).
 
 ---
+
+## Decision 22: Hosted-DB Migration History Baseline Procedure (Phase 4 Transition Prerequisite)
+
+**Decided in Session B (Cat 3 backlog resolution).**
+
+### Context
+
+Cat 3 backlog item #2 surfaces a Phase 4 blocker. The hosted/remote
+Supabase database's migration_history table has no record of
+000_baseline or migrations 001-004 — those tables were created
+manually in the SQL Editor before the migrations directory existed
+in the repo. Phase 4 work that involves applying migrations to the
+hosted DB cannot begin until the remote migration history is
+baselined.
+
+CLAUDE.md currently documents this as a stop-point (lines 71-83):
+do NOT run `supabase db push`, `supabase db remote commit`,
+`supabase migration up --linked`, or any command that applies local
+migrations to the hosted/remote/production database until the remote
+has been baselined via `supabase migration repair`.
+
+This Decision documents the locked baseline procedure, the
+verification gates, the failure modes and recovery procedures, and
+the Phase 4 transition criteria.
+
+Honest framing: this is a procedural/transitional Decision rather
+than a typical architectural one. No new schema, no new operational
+pattern. But the procedural rigor matters because the failure modes
+are subtle and silent — the highest-risk mode (drift between local
+migration files and remote schema) does not manifest at baseline
+time; it manifests months later when a downstream migration assumes
+state that doesn't actually exist.
+
+The Decision is informed by chat 4's independent architectural read
+which surfaced six substantive concerns: drift failure mode (Mode
+D) as the most consequential silent failure, Mode C gating that was
+too permissive, missing fourth Phase 4 condition (schema.sql
+regeneration verification), missing failure modes E (wrong project)
+and F (CLI version), strict pre-state commitment, and historical
+context in section documentation. All concerns have been integrated
+into the locked commitments.
+
+### Question
+
+What is the locked procedure for baselining the hosted DB's
+migration history, what verification gates apply before and after,
+what failure modes are anticipated and how are they recovered, where
+does this documentation live in v2, and what conditions gate Phase
+4 from beginning?
+
+### Resolution
+
+Ten architectural commitments.
+
+**22.1: Phase 4 transition gate.**
+
+Phase 4 work involving migrations cannot begin until the baseline
+procedure is executed and verified. The CLAUDE.md stop-point
+(currently lines 71-83) remains in force until Phase 4 transition
+criteria (22.8) are all satisfied. Until then, Claude Code must
+STOP and surface the hazard rather than running migration commands
+that would apply local migrations to the hosted DB.
+
+**22.2: The baseline procedure — six-step sequence.**
+
+The procedure is six sequential steps. Each step has explicit
+verification before proceeding to the next.
+
+**Step 0 — Backup current migration_history table contents.**
+
+Before any modification, capture the current state of
+supabase_migrations.schema_migrations to a file. The table is
+trivially small; the safety net matters.
+
+Mechanism: query the table via psql or Supabase CLI, persist to
+disk under a timestamped filename. Suggested:
+
+    supabase_migrations_schema_migrations_backup_<YYYYMMDD-HHMMSS>.sql
+
+The backup file is retained in the operator's local environment
+(not committed to the repo) and serves as the recovery baseline
+if Mode C (see 22.5) becomes necessary.
+
+**Step 1 — Pre-procedure verification gates (per 22.3).**
+
+All verification gates in 22.3 must pass before any repair command
+runs. If any gate fails, STOP. Do not proceed.
+
+**Step 2 — Run five sequential repair commands.**
+
+    supabase migration repair --linked --status applied 000
+    supabase migration repair --linked --status applied 001
+    supabase migration repair --linked --status applied 002
+    supabase migration repair --linked --status applied 003
+    supabase migration repair --linked --status applied 004
+
+Each command marks one local migration as already-applied without
+re-running it. The procedure is sequential (not a single command
+with multiple version arguments) for explicit per-step verification
+gates between commands.
+
+The procedure is idempotent at the migration level: running
+`supabase migration repair --linked --status applied <version>` on
+a migration that is ALREADY marked applied is a no-op or
+success-on-already-applied. This idempotency is the foundation for
+Mode B recovery (see 22.5).
+
+**Step 3 — Per-command post-verification (per 22.4).**
+
+After each repair command succeeds, verify via
+`supabase migration list --linked` that the just-repaired migration
+shows as applied. If the list shows an unexpected state after any
+single repair, STOP and investigate before proceeding to the next
+migration.
+
+**Step 4 — Final post-procedure verification.**
+
+After all five repair commands succeed, `supabase migration list
+--linked` should show all five migrations as applied:
+
+    000_baseline                | applied
+    001_invitations             | applied
+    002_security_hardening      | applied
+    003_team_admin_role         | applied
+    004_team_admin_management   | applied
+
+If the final list differs from this expected state, STOP and
+investigate before declaring baseline complete.
+
+**Step 5 — Schema.sql regeneration smoke test (per 22.8 condition 4).**
+
+After baseline is verified, run the schema.sql regeneration mechanism
+established by Decision 10. Confirm the output matches expected
+(should be effectively no change from current committed schema.sql
+since baseline established the same state already on disk).
+
+If schema.sql regeneration produces unexpected output, STOP. The
+regeneration mechanism is the Phase 4 development feedback loop;
+it must be working correctly before Phase 4 begins.
+
+**22.3: Pre-procedure verification gates.**
+
+Six gates must pass before Step 2 runs:
+
+**Gate 1 — Local repo state.** `git status` clean, working tree on
+the expected branch (current Phase 3 branch).
+
+**Gate 2 — Local migrations present.** `ls supabase/migrations/`
+returns the expected five files: 000_baseline.sql,
+001_invitations.sql, 002_security_hardening.sql,
+003_team_admin_role.sql, 004_team_admin_management.sql.
+
+**Gate 3 — Supabase CLI authenticated and version pinned.**
+`supabase projects list` returns the expected project. The CLI
+version is pinned to the version tested at baseline procedure
+documentation time. Version mismatch is failure mode F (see 22.5).
+
+**Gate 4 — Linked project verified against known-good project ID.**
+`supabase status --linked` shows the correct project ID, matched
+against the project ID stored persistently (in CLAUDE.md or a
+committed config file). A single-character typo in project ID is
+unrecoverable surgery on the wrong database. Visual inspection is
+NOT sufficient — the verification is "matches the stored ID exactly,"
+not "looks right."
+
+**Gate 5 — Migration history pre-state strict commitment.**
+`supabase migration list --linked` must return one of two acceptable
+pre-states:
+
+- (a) Empty migration_history (the expected greenfield case for this
+  hazard)
+- (b) One or more of 000-004 already marked applied (the
+  idempotent partial-completion recovery case)
+
+Any other pre-state — 005+ entries present, unknown versions,
+partial state across non-000-004 versions, mixed unexpected
+entries — triggers STOP for human investigation. The baseline
+procedure does NOT silently overwrite unexpected state.
+
+**Gate 6 — Drift verification between local files and actual remote
+schema (per 22.9).**
+
+This is the most critical pre-verification gate. Before any repair
+command runs, generate the actual remote schema via `supabase db
+diff` and compare against the local supabase/schema.sql (Decision
+10's generated artifact). If they don't match, STOP and reconcile
+before proceeding.
+
+See 22.9 for the full drift handling commitment.
+
+If any gate fails, STOP. Do not proceed to Step 2.
+
+**22.4: Per-command post-verification commitments.**
+
+After each repair command in Step 2, verify the next state via
+`supabase migration list --linked`. The just-repaired migration must
+show as applied. If unexpected state at any point, STOP and
+investigate before proceeding to the next migration in the sequence.
+
+The verification commitments are NOT optional — they are not just
+operational hygiene, they are architectural gates. The procedure
+explicitly trades sequential-command-overhead for explicit per-step
+state visibility. Single-command alternatives (e.g., `supabase
+migration repair --linked --status applied 000 001 002 003 004`)
+are deliberately NOT used because they defer all verification to
+the end and lose per-step state visibility.
+
+**22.5: Failure modes and recovery procedures — six named modes.**
+
+**Mode A — Repair command itself fails.** CLI returns an error
+before modifying the migration history. Recovery: address the
+underlying error (typically authentication, network, or CLI
+version), retry the command. No rollback needed because no state
+change occurred.
+
+**Mode B — Partial completion across commands.** Some migrations
+are marked applied, others are not (e.g., 000-002 succeeded but 003
+failed). Recovery: identify which are already marked applied via
+`supabase migration list --linked`, resume the procedure with the
+next unrepaired migration. The procedure is idempotent at the
+migration level (per 22.2 commitment) so re-running repair on
+already-applied migrations is safe.
+
+**Mode C — All repairs succeed but migration history doesn't match
+expectations.** Recovery requires direct SQL surgery on
+supabase_migrations.schema_migrations. Mode C is gated per 22.10
+as a last-resort escape valve with concrete procedural requirements.
+
+**Mode D — Drift between local migration files and actual remote
+schema.** This is the most consequential silent failure. The drift
+verification gate (22.3 Gate 6, full commitment in 22.9) prevents
+this mode from manifesting at baseline time. Without Gate 6, this
+mode is silent — post-repair, the migration_history claims a state
+the database doesn't actually have; subsequent migrations (005+) may
+fail when they assume baseline state that isn't present.
+
+Recovery if Mode D is detected post-baseline (drift discovered
+after baseline procedure ran): the situation requires Mode C-style
+intervention plus reconciliation work on the local schema.sql and/or
+000_baseline.sql to align local files with actual remote state.
+Detection mechanism: `supabase db diff` shows differences between
+local schema.sql and remote that should not exist post-baseline.
+
+**Mode E — Wrong linked project.** The pre-verification gate
+(22.3 Gate 4) prevents this mode by matching the linked project ID
+against a known-good stored ID. If the gate fails (linked project
+ID does not match stored ID), STOP — do not run repair against the
+wrong database.
+
+Recovery if Mode E is detected after repair commands have already
+run against the wrong project: requires Mode C on the wrong project
+to undo the spurious baseline entries, then correct project linkage
+via `supabase link --project-ref <correct-id>`, then restart the
+baseline procedure from Step 0.
+
+**Mode F — CLI version mismatch.** The pre-verification gate
+(22.3 Gate 3) prevents this mode by checking CLI version against
+the pinned tested version. Repair behavior is version-dependent;
+running an untested CLI version produces unpredictable results.
+
+Recovery if Mode F is detected before repair commands run: install
+the pinned CLI version, re-run pre-verification. Recovery if
+detected after repair commands have run with the wrong CLI version:
+case-by-case investigation based on actual observed behavior; may
+require Mode C intervention.
+
+**22.6: Documentation location — new section "Data Migration
+Tooling" in v2.**
+
+Decision 22 adds a new section to v2's architecture reference titled
+"Data Migration Tooling." This section was previously flagged as
+Tier 4 cross-cutting future work; Decision 22 advances it.
+
+The section is the authoritative reference for migration tooling
+across the platform lifecycle, not just the one-time baseline
+procedure. Section content includes:
+
+- Historical context of the hazard (why it exists — manual SQL
+  Editor changes before migrations directory existed, what the
+  original setup looked like, lessons learned)
+- The locked baseline procedure (per 22.2, 22.3, 22.4)
+- The failure modes and recovery procedures (per 22.5)
+- The Mode C gating procedure (per 22.10)
+- The Phase 4 transition criteria (per 22.8)
+- Cross-references to Decision 10's schema.sql regeneration
+  mechanism
+- Ongoing operational mechanics post-baseline (how `supabase db
+  push` works, how schema.sql regenerates, how to verify migration
+  history matches expectation across subsequent migration work)
+
+A future operator reading this section three years from now should
+understand both what to do and why this section exists. The section
+serves audit defensibility and protects against similar situations
+recurring.
+
+**22.7: CLAUDE.md stop-point evolution and password handling.**
+
+Current CLAUDE.md stop-point text (lines 71-83) remains in force
+until Phase 4 transition criteria (22.8) are satisfied. After
+Decision 22 commits but before baseline is executed, the stop-point
+text is updated to cross-reference Decision 22's documented
+procedure:
+
+"See Decision 22 and the Data Migration Tooling section for the
+locked baseline procedure. STOP and surface this hazard if asked
+to push migrations to the remote until baseline is verified
+complete."
+
+The stop-point itself stays. Claude Code must still STOP and
+surface the hazard rather than running migration commands directly,
+until Phase 4 transition criteria are satisfied.
+
+**Password handling.** The `supabase migration repair` command takes
+a `--password` flag. The procedure specifies:
+
+- Use interactive prompt for password (Supabase CLI default behavior
+  if password is not passed inline)
+- NEVER inline the password in shell commands
+- NEVER commit any artifact containing the password
+- The password should not appear in shell history, git history, or
+  any committed file
+
+Password-in-shell-history is a real exposure surface. The
+interactive prompt is the safer default.
+
+**22.8: Phase 4 transition criteria — four conditions.**
+
+Phase 4 work can begin once ALL four conditions are satisfied:
+
+1. **Baseline procedure executed and verified.** Per 22.2 Steps 0-4
+   complete with all per-step verifications passing.
+
+2. **Schema.sql regeneration mechanism verified working
+   post-baseline.** Per 22.2 Step 5. The schema generator script
+   (or equivalent Decision 10 mechanism) runs successfully and
+   produces expected output.
+
+3. **Session-handoff entry documenting successful execution.** A
+   session-handoff entry records the execution date, the verifying
+   user (Andre), the pre-state observed (per 22.3 Gate 5), the
+   post-state confirmed (per 22.4 final verification), and any
+   anomalies encountered and resolved. This entry serves as the
+   permanent record that baseline was successfully completed.
+
+4. **CLAUDE.md stop-point updated to RESOLVED.** The stop-point
+   text is updated to "RESOLVED" status with the execution date.
+   This is the LAST step in the Phase 4 transition. It signals
+   that Phase 4 is unblocked.
+
+The four conditions are ordered. Condition 4 (CLAUDE.md update) is
+the LAST step that signals readiness, not parallel to verification.
+Sequence: complete baseline -> verify (Steps 4 and 5) -> session
+handoff entry -> CLAUDE.md update -> Phase 4 unblocked.
+
+Before all four conditions are met, Phase 4 work is BLOCKED. After
+all four, Phase 4 work proceeds normally and the stop-point becomes
+historical context preserved in the Data Migration Tooling section.
+
+**22.9: Drift verification — the critical pre-baseline gate.**
+
+The most consequential failure mode in this procedure (Mode D in
+22.5) is silent: post-repair, the migration_history claims a state
+the database doesn't actually have. Subsequent migrations (005+)
+may assume baseline state that isn't present. The drift verification
+gate prevents this mode from manifesting at baseline time.
+
+**Mechanism.** Before Step 2 of the baseline procedure runs:
+
+1. Generate the actual remote schema via `supabase db diff`
+2. Compare against the local supabase/schema.sql (Decision 10's
+   generated artifact)
+3. If they match (no significant drift), proceed to Step 2
+4. If they don't match, STOP and reconcile
+
+**Reconciliation.** When drift is detected, two real reconciliation
+paths:
+
+- (a) Update 000_baseline.sql to match actual remote state. The
+  local file becomes the source of truth for what's actually on
+  the remote.
+- (b) Apply corrective SQL to the remote to bring it into alignment
+  with the local file. The local file remains the authoritative
+  source.
+
+The reconciliation choice depends on which state is correct
+(intended). Path (a) is appropriate when the remote is the source
+of truth (manual changes captured operational decisions that should
+persist). Path (b) is appropriate when the local file is the source
+of truth (manual changes were accidental drift that should be
+corrected).
+
+Either reconciliation path requires explicit Andre approval and a
+session-handoff entry documenting the reconciliation. The drift
+verification gate is non-optional — bypassing it converts the
+baseline procedure from "safe and idempotent" to "potential silent
+corruption of migration history."
+
+**22.10: Mode C gating — last-resort escape valve with five named
+gates.**
+
+Mode C (all repairs succeed but migration history doesn't match
+expectations) requires direct SQL surgery on
+supabase_migrations.schema_migrations. This is rare, high-risk,
+high-context work. Mode C is gated as a last-resort escape valve
+with concrete procedural requirements, not a routine fallback.
+
+**Five gates must be satisfied before any Mode C SQL runs:**
+
+**Gate 1 — Backup before modification.** Capture
+supabase_migrations.schema_migrations table contents to a file
+before running any UPDATE or DELETE. (This is the same backup
+captured in Step 0 of 22.2; verify it exists and is current. If
+not, capture it now.) The table is trivially small; the backup
+cost is negligible; the safety net matters.
+
+**Gate 2 — Explicit Andre approval of the specific SQL.** Not
+"warrantor approval" or "operator approval" — Andre by name. The
+SQL must be stated in full (not described abstractly) before
+approval is granted.
+
+**Gate 3 — Chat 4 verification round on the specific SQL.** Mode
+C is rare enough that the verification round overhead is worth it.
+Paste the proposed SQL into chat 4 for independent verification
+before running. Chat 4's read is independent of in-session
+groupthink and may surface concerns about side effects on related
+rows or related state.
+
+**Gate 4 — Session-handoff entry documenting the surgery.** Before
+the SQL runs, draft a session-handoff entry capturing: the SQL to
+be applied, the rationale, the verification steps run (including
+Gates 1-3), the state before, and the expected state after. The
+entry goes in the decisions log or a dedicated incident-handling
+section.
+
+**Gate 5 — Post-modification verification.** After the SQL runs,
+immediately re-run `supabase migration list --linked` and confirm
+the actual state matches the expected state from Gate 4. If not,
+more surgery is required — return to Gate 1 with the new SQL.
+
+**If any gate fails, do not proceed.** Mode C is not the right
+recovery path when any gate fails.
+
+If actual state is genuinely unrecoverable through CLI commands
+AND Mode C is also unworkable (e.g., the supabase_migrations table
+itself is in an unexpected state), the recovery path becomes
+"restore from point-in-time backup" — out of scope for this
+Decision but flagged for awareness.
+
+### Schema additions
+
+None. Decision 22 is a procedural Decision; no schema changes are
+required for the procedure to be locked. The architectural
+commitment is to the procedure documentation and to the Phase 4
+transition gating.
+
+### Cross-section dependencies
+
+- **CLAUDE.md (project-level operational rules):** Stop-point text
+  updated per 22.7. Stop-point itself remains in force until Phase
+  4 transition criteria are satisfied per 22.8.
+- **New section "Data Migration Tooling" in architecture-reference-
+  v2.md:** Per 22.6. Section is added to v2 by Decision 22.
+- **Decision 10 (Migrations as canonical schema, schema.sql as
+  generated artifact):** Schema.sql regeneration is verified as
+  part of the Phase 4 transition (22.8 condition 2). Cross-
+  referenced from the new Data Migration Tooling section.
+
+### Open architectural questions deferred
+
+- **What if supabase_migrations table itself is in an unexpected
+  state.** If the migration_history table itself is corrupted or
+  in an unrecoverable state (beyond what Mode C SQL surgery can
+  fix), the recovery path becomes "restore from point-in-time
+  backup." Backup restoration is out of scope for this Decision;
+  flagged for operator awareness if Mode C escalates.
+
+- **Multi-tenant migration tooling complexity.** Decision 22
+  addresses the single hosted DB / single tenant scenario at this
+  phase. Multi-tenant migration considerations (when WarrantyOS
+  serves multiple tenants on the same hosted DB at scale) are
+  outside the immediate hazard scope and deferred to future
+  Decisions if operational pressure surfaces.
+
+- **Test migration smoke test as additional Phase 4 prerequisite.**
+  Chat 4 surfaced this as a possible additional condition for
+  Phase 4 transition (apply a no-op migration end-to-end to confirm
+  the entire migration pipeline works post-baseline). Not added to
+  the four locked conditions but flagged as operational hygiene
+  worth doing alongside the schema.sql regeneration verification.
+
+- **Backup verification before Phase 4 starts.** Chat 4 surfaced
+  recent point-in-time backup verification as standard pre-major-
+  work hygiene. Not added to the locked conditions but flagged
+  for operational awareness.
+
+### Decision implications for already-committed sections
+
+**New section in v2's architecture reference:** Data Migration
+Tooling. Section content per 22.6.
+
+**CLAUDE.md stop-point evolution per 22.7:** Cross-reference
+updated to point to Decision 22 and the new Data Migration Tooling
+section. Stop-point itself remains in force.
+
+These land in subsequent commits this session if pacing permits,
+or in a follow-up session if pacing requires deferral.
+
+This Decision resolves Cat 3 backlog item #2 (Hosted-DB-no-migration-
+history hazard) at the architectural commitment level. The procedure
+itself executes when Phase 4 begins, which is downstream of this
+Decision. Remaining Cat 3 backlog: seven items.
+
+---
 ## Future decisions
 
 Decisions 17+ will be appended above this section as triage-and-resolve
