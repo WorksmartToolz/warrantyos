@@ -3241,7 +3241,8 @@ Parallel to the deliberate-omissions lists elsewhere:
 **Status: Designed at the architectural level.** This section is sourced
 primarily from SOP 5 (Submitting a Warranty Service Report), with
 cross-references to SOP 1 (Accepted Warranty Claim Lifecycle) for the
-three-day customer review window and Assumption of Acquiesce, and SOP 0
+tenant-configurable customer review window (three-day default per
+Decision 21) and Assumption of Acquiesce, and SOP 0
 (Warranty Management System Capabilities) for the platform capability
 framing. The schema, the submitter dual-FK shape, the customer review
 mechanism, the three-day clock event, and the universal content fields
@@ -3548,10 +3549,10 @@ it fires on the clock event regardless of who could have responded.
 Tenants who require O&M Provider Service Report review must wait for
 Cat 3 #9 to land.
 
-### The three-day window: a new clock event type
+### The customer review window: a new clock event type
 
-The three-day customer review window is a future-firing deadline. The
-canonical mechanism is the Clock Event Infrastructure from Decision 9 —
+The customer review window is a future-firing deadline. The canonical
+mechanism is the Clock Event Infrastructure from Decision 9 —
 clock_events, pg_cron-driven hourly. This section adds a new event type
 to the enum, leveraging the extensibility property the Tier 1 section
 locked. The Phase 1 event types from the Clock Event Infrastructure
@@ -3559,8 +3560,8 @@ section (registration_prep_pre_trigger, info_request_due,
 warranty_expiry_warning, trigger_confirmation_overdue) are now joined
 by a fifth:
 
-- service_report_response_due — fires when the three-day customer review
-  window expires. The dispatcher checks the service_reports row: if
+- service_report_response_due — fires when the customer review window
+  expires. The dispatcher checks the service_reports row: if
   customer_decision is still null at firing time, the row is updated
   with customer_decision = 'accepted' AND accepted_by_acquiescence =
   true AND customer_decided_at = the firing moment, then the claim
@@ -3572,17 +3573,39 @@ by a fifth:
 The event is inserted into clock_events at the moment the customer
 notification is sent (when the reviewer accepts the report and the
 customer link is issued). entity_type = 'service_report', entity_id =
-the report's id, fires_at = now() + interval '3 days'. The payload
-JSONB carries the report id and any context the dispatcher needs.
+the report's id, fires_at = now() + interval '[N] days' where N is the
+tenant's configured window length. The payload JSONB carries the
+report id and any context the dispatcher needs.
 
-The three-day window is the minimum from SOP 1 ("a minimum of three
-days"). Whether tenants can configure the window length per their own
-contractual norms — and where that configuration lives (tenants.settings
-with a service_report_response_days key, parallel to the existing
-ala_markup_percent and rich_text_max_chars settings) — is a Phase 3
-implementation detail flagged here. The architectural commitment is the
-clock-event-driven mechanism; the window length default and
-configurability are downstream.
+The window length is per-tenant configurable per Decision 21. Storage
+at tenants.settings.service_report_response_days (JSONB key), DEFAULT
+3 days at provisioning, application-layer validation bounds of 3-30
+days. The three-day default matches SOP 1's "a minimum of three days"
+baseline and the canonical platform convention established by Decision
+21.6 (three days is the canonical default for any claimant response
+window on the platform). Storage shape parallels Decision 7's
+ala_markup_percent and Decision 19's ala_decline_recant_window_days.
+
+Tenant setting changes are future-effective only (Decision 21.7).
+When a tenant updates service_report_response_days, in-flight Service
+Reports retain their original window — fires_at is locked at row
+creation; setting changes do not retroactively recalculate fires_at
+for pending clock events. New Service Reports issued after the
+setting change use the new window. The clock_events.fires_at value is
+the structural record of which window applied to each Service Report;
+the window length is derivable from fires_at minus issued_at if
+needed for analysis.
+
+The silence-acceptance path (Assumption of Acquiesce) is gated by a
+Feature Flag per Decision 21.5. The service_report_acquiesce_window
+feature flag (default enabled at provisioning) controls whether the
+service_report_response_due clock event is created at Service Report
+issuance. When the flag is enabled (default), the event is created
+and silence-acceptance fires at window expiry. When the flag is
+disabled, the event is NOT created; the customer must explicitly
+accept or dispute via the tokenized review interface; the claim
+remains open until the customer acts. The feature flag joins the
+Phase 1 features list in the Feature Flag System section.
 
 ### Claim status interactions (deferred to claim lifecycle)
 
@@ -3633,10 +3656,14 @@ Flagged for downstream / Phase 3 implementation:
   detail, parallel to the customer review token shape and to the claim
   intake token shape from Claim Intake's outstanding questions. The
   pattern's "shape to copy, not shared store" rule applies either way.
-- Customer review window length configurability: whether tenants can
-  configure the three-day default, and where the configuration lives.
-  Default is locked at three days per SOP 1; configurability is
-  downstream.
+- Customer review window length configurability: resolved by Decision
+  21. Window length is per-tenant configurable at
+  tenants.settings.service_report_response_days (JSONB key), DEFAULT
+  3 days, application-layer validation bounds of 3-30 days. Setting
+  changes are future-effective only (Path A on in-flight Service
+  Reports). Silence-acceptance behavior is gated by feature flag
+  service_report_acquiesce_window (default enabled). See the customer
+  review window subsection above for the full mechanic.
 - service_report_response_due dispatcher payload shape: each clock event
   type has an expected payload schema validated at insert time. The
   shape for this new event type is a Phase 3 implementation detail.
