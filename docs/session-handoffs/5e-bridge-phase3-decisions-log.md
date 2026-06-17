@@ -2710,6 +2710,276 @@ Authorization document architecture). Remaining Cat 3 backlog: nine
 items.
 
 ---
+
+## Decision 21: Service Report Customer Review Window Configurability and Canonical Three-Day Response Window Convention
+
+**Decided in Session B (Cat 3 backlog resolution).**
+
+### Context
+
+Cat 3 backlog item #4 surfaced the Service Report customer review
+window length as a deferred Phase 3 implementation detail. The
+Service Report Submission section already flagged this at line
+3581 (pre-Decision-21 line numbering): "Whether tenants can
+configure the window length per their own contractual norms — and
+where that configuration lives (tenants.settings with a
+service_report_response_days key, parallel to the existing
+ala_markup_percent and rich_text_max_chars settings) — is a Phase
+3 implementation detail flagged here. The architectural commitment
+is the clock-event-driven mechanism; the window length default and
+configurability are downstream."
+
+This Decision resolves the deferred question. The architectural
+commitments apply Decision 19's precedent
+(ala_decline_recant_window_days) to the Service Report customer
+review window AND establish a canonical platform convention for
+three-day claimant response windows that future similar Decisions
+inherit.
+
+Andre's operational catch during the session surfaced an important
+cross-cutting concern: three days is the canonical claimant
+response window across the platform (per SOP 1's "a minimum of
+three days" baseline and Decision 19's prior commitment to three
+days for ala_decline_recant_window_days). Future Decisions adding
+similar windows should default to three days unless operational
+pressure surfaces otherwise. This Decision establishes that
+convention explicitly.
+
+### Question
+
+How is the Service Report customer review window length configured
+across tenants, what is the default value, what bounds apply, what
+mechanism handles tenants who want to disable the silence-acceptance
+behavior entirely, and what convention governs future similar
+windows on the platform?
+
+### Resolution
+
+Eight architectural commitments.
+
+**21.1: Service Report customer review window length is per-tenant
+configurable.**
+
+Storage at tenants.settings.service_report_response_days (JSONB key).
+Storage shape parallels Decision 7's ala_markup_percent and Decision
+19's ala_decline_recant_window_days — single per-tenant scalar value
+with application-layer validation.
+
+**21.2: Platform default at provisioning: 3 days (calendar days).**
+
+The default matches the canonical platform convention established
+by 21.6. Three days reflects SOP 1's "a minimum of three days"
+baseline and Decision 19's prior commitment to three days for the
+ALA decline-recant window.
+
+**21.3: Validation bounds: 3-30 days.**
+
+Application-layer validation enforces. Bounds match Decision 19's
+ala_decline_recant_window_days bounds for consistency. Minimum
+of 3 honors SOP 1's stated floor; maximum of 30 is a sensible
+operational ceiling.
+
+**21.4: Calendar days, not business days.**
+
+Implementation uses now() + interval '[N] days' on the clock event's
+fires_at calculation. Tenants who want effective business-day
+behavior can configure a longer value to approximate it (e.g., 5
+calendar days for approximately 3 business days excluding weekends).
+
+Business-day arithmetic is deliberately not adopted at v1 because:
+- Implementation complexity is real (per-tenant holiday calendars
+  would be required for true business-day accuracy)
+- v2's clock-event-driven mechanism stays simple
+- Tenants who need effective business-day behavior have the
+  per-tenant configurability to approximate it
+- Future expansion to business-day mode is possible if operational
+  pressure surfaces
+
+**21.5: Tenant disable capability via Feature Flag System.**
+
+New feature flag service_report_acquiesce_window (default enabled
+at provisioning). When the flag is disabled, the
+service_report_response_due clock event is NOT created at Service
+Report issuance. The silence-acceptance path (Assumption of
+Acquiesce per SOP 1) does not fire. The customer must explicitly
+accept or dispute via the tokenized review interface; the claim
+remains open until the customer acts.
+
+The Feature Flag System (Phase 0 Item 18) is the right home for
+this rather than another tenants.settings key because:
+- This is conceptually a feature gate (on/off behavior), not a
+  scalar configuration
+- The Feature Flag System provides admin UI and documented audit
+  logging
+- Consistent with how other tenant-toggleable behaviors are handled
+
+The flag joins the Phase 1 features list in the Feature Flag System
+section.
+
+**21.6: Canonical platform convention — three days is the canonical
+claimant response window across the platform.**
+
+This Decision establishes an explicit architectural convention:
+three days is the canonical default for any claimant response
+window on the platform. Each per-tenant setting still exists
+(tenants can override per-window), but new Decisions adding similar
+windows MUST default to three days unless an operational pressure
+surfaces otherwise.
+
+Applies to:
+- ala_decline_recant_window_days (Decision 19, already 3)
+- service_report_response_days (this Decision)
+- Future Cat 3 #5 ALA reminder window (when that Decision lands)
+- Any future claimant response window
+
+Rationale: SOP 1's "a minimum of three days" baseline plus Decision
+19's three-day default already establish the de facto convention.
+Naming it as a platform convention prevents future Decisions from
+re-inventing or picking different defaults. The convention is
+documentation-level architectural commitment, not a schema-level
+mechanism.
+
+**21.7: Tenant setting changes are future-effective only (Path A on
+in-flight Service Reports).**
+
+When a tenant updates tenants.settings.service_report_response_days,
+in-flight Service Reports retain their original window. The
+clock_events.fires_at value is locked at Service Report issuance
+when the clock event row was created; setting changes do not
+retroactively recalculate fires_at for pending clock events.
+
+New Service Reports issued after the setting change use the new
+window value.
+
+Path A is chosen over Path B (cascading propagation with tenant
+warning before commit) because:
+- No new propagation architecture required; v2's existing clock_events
+  shape already handles this naturally
+- Operationally honest about how Service Level Agreement changes
+  typically work (future-effective is the standard interpretation)
+- Customers in-flight retain their original window expectation
+  rather than receiving silent extensions they're not notified of
+- No cascade pattern that would need to apply consistently across
+  Decision 19 and other future windows
+- KPI concerns (a tenant wanting to compare claim closure performance
+  before/after a policy change) are addressable in reporting (filter
+  by issuance date) rather than requiring clock event recalculation
+
+The reading of clock_events.fires_at IS the structural record of
+which window applied to each Service Report. No separate snapshot
+column on service_reports is needed; the window length is derivable
+from fires_at minus issued_at.
+
+**21.8: Resolves Cat 3 backlog item #4.**
+
+The Service Report Submission section's existing Phase 3-deferred
+flag is replaced with the locked configurability commitment. The
+"three-day customer review window" framing throughout the section
+is updated to "tenant-configurable customer review window with
+three-day default."
+
+### Schema additions
+
+None to operational tables. Two additions to existing infrastructure:
+
+**Tenant settings (JSONB):**
+
+- service_report_response_days integer
+  -- DEFAULT 3 at provisioning
+  -- application-layer validation: 3-30 day bounds
+  -- per-tenant configurable
+
+**Feature Flag System (Phase 0 Item 18):**
+
+- service_report_acquiesce_window boolean
+  -- DEFAULT enabled at provisioning
+  -- when disabled, service_report_response_due clock event is NOT
+  --   created at Service Report issuance
+  -- joins Phase 1 features list
+
+No changes to service_reports table. No changes to clock_events
+table. The configurability flows entirely through tenants.settings
+and Feature Flag System.
+
+### Cross-section dependencies
+
+- **Service Report Submission section:** Multiple updates — window
+  length framing, the Phase 3-deferred flag replacement, the
+  feature flag gating mechanic for clock event creation, the
+  canonical platform convention cross-reference
+- **Feature Flag System (Phase 0 Item 18):** New feature flag
+  service_report_acquiesce_window added to Phase 1 features list
+- **Tenant provisioning Server Action:** Adds the new
+  tenants.settings key and the new feature flag at provisioning
+- **Decision 19 (ALA decline-recant window):** Cross-references
+  Decision 21.6's canonical platform convention — Decision 19's
+  three-day default aligns with the convention established here
+  (no schema or section changes needed in the ALA System section;
+  the convention is documentation-level)
+- **Future Cat 3 #5 (ALA reminder notifications via clock_events):**
+  Should default any new claimant response window to three days
+  per the canonical convention
+
+### Open architectural questions deferred
+
+- **Business-day arithmetic mode.** v1 commits to calendar days.
+  If operational pressure surfaces for business-day windows (e.g.,
+  tenants in regulated industries with explicit business-day
+  contractual language), a future Decision can add a business-day
+  mode. Implementation would require per-tenant holiday calendars.
+  Not in v1 scope.
+
+- **Cascading propagation on setting changes (Path B).** Path A is
+  locked at v1. If operational pressure surfaces for immediate
+  cascade of setting changes to in-flight clock events, a future
+  Decision can add the propagation pattern. Would apply consistently
+  across ala_decline_recant_window_days, service_report_response_days,
+  and any future similar settings. Not in v1 scope.
+
+- **Window length for Notice of Closure response (if any).** v2's
+  current architecture does not have a Notice of Closure response
+  window. If future Decisions add one, the canonical three-day
+  convention from 21.6 applies.
+
+### Decision implications for already-committed sections
+
+**Service Report Submission section** (multiple updates):
+
+1. Window length references throughout — replace "three-day customer
+   review window" framing with "tenant-configurable customer review
+   window with three-day default per the canonical platform convention
+   (Decision 21.6)."
+
+2. The Phase 3-deferred flag (current line 3581 area) — replace with
+   the locked configurability commitment. Cross-reference
+   tenants.settings.service_report_response_days for the per-tenant
+   configurability, the 3-30 day bounds, and the Path A
+   future-effective-only semantics.
+
+3. The service_report_response_due clock event documentation — add
+   the feature flag gating mechanic: when
+   service_report_acquiesce_window is disabled, the clock event is
+   NOT created; the silence-acceptance path does not fire.
+
+4. The three possible actions in the customer review interface
+   (accept, dispute, no action) — clarify that the "no action" path
+   (Assumption of Acquiesce) only operates when the
+   service_report_acquiesce_window feature flag is enabled.
+
+**Feature Flag System (Phase 0 Item 18) section:**
+
+Add service_report_acquiesce_window to the Phase 1 features list.
+Light touch addition.
+
+Section revisions land in subsequent commits following this
+Decision's commit.
+
+This Decision resolves Cat 3 backlog item #4 (Customer review window
+configurability for Service Report) and establishes the canonical
+platform convention for three-day claimant response windows.
+Remaining Cat 3 backlog: eight items (down from nine).
+
+---
 ## Future decisions
 
 Decisions 17+ will be appended above this section as triage-and-resolve
