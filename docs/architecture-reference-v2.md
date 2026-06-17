@@ -389,7 +389,7 @@ provisioning.
 
 ### Phase 1 features
 
-Two flags ship in Phase 1:
+Three flags ship in Phase 1:
 
 - **`epc_workflow`** — gates the EPC trigger sources (`contractual_date_manual`,
   `wbs_integration`) and EPC-specific UI: WBS integration configuration,
@@ -398,9 +398,18 @@ Two flags ship in Phase 1:
   (`delivery_report_tokenized`, `delivery_report_api`) and supply-only-specific
   UI: delivery-reporting form configuration, overdue-trigger escalation surfaces,
   supply-only-flavored registration prep flows.
+- **`service_report_acquiesce_window`** — gates the silence-acceptance path
+  (Assumption of Acquiesce per SOP 1) on Service Report customer review.
+  When enabled (default), the service_report_response_due clock event is
+  created at Service Report issuance and silence-acceptance fires at window
+  expiry. When disabled, the clock event is NOT created; the customer must
+  explicitly accept or dispute via the tokenized review interface; the claim
+  remains open until the customer acts. Added by Decision 21.5.
 
-Both default to enabled. Hybrid tenants leave both on; pure-shape tenants disable
-the one they don't use.
+All three default to enabled at provisioning. Hybrid tenants leave the
+workflow flags both on; pure-shape tenants disable the one they don't use.
+Tenants who want explicit-only customer review on Service Reports (no
+silence-acceptance) disable service_report_acquiesce_window.
 
 ### How flags gate the trigger model (defense-in-depth)
 
