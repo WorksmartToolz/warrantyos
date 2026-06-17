@@ -468,14 +468,83 @@ discriminates the kind of contact. The Phase 1 categories are:
 - `subcontractor_contact`
 - `vendor`
 - `vendor_contact`
+- `om_provider`
+- `om_provider_contact`
 - `registration_assignee`
 - `other`
+
+Ten categories total. The `om_provider` and `om_provider_contact` values were
+added by Decision 20, which recognized O&M Providers as a distinct operational
+party (operators and maintainers of the warrantied system, typically engaged
+as the customer's authorized agent for warranty matters).
 
 This is a single-table approach for the prototype. The alternative — a separate
 table per contact kind — is held in reserve: specialized tables are introduced
 only if type-specific fields proliferate to the point that one shared shape
 stops fitting. Until then, one table with a discriminator is simpler to query,
 simpler to import into, and simpler to reference.
+
+#### Matched-pair traversal: parent_contact_id
+
+Four contact_type values appear in matched pairs — an organization-level
+contact_type and an individual-contact variant: customer + customer_contact,
+subcontractor + subcontractor_contact, vendor + vendor_contact, and om_provider
++ om_provider_contact. The individual-contact variants must reference their
+parent organization to enable agency and authorization traversal. The contacts
+table carries a `parent_contact_id` column for this purpose:
+
+- `parent_contact_id` uuid nullable FK -> contacts (self-referential)
+  -- references the parent organization contact when this row is an
+  --   individual-contact variant
+  -- null for organization-level rows (customer, subcontractor, vendor,
+  --   om_provider)
+  -- null for non-matched-pair rows (registration_assignee, other)
+
+CHECK / application-layer invariant: when contact_type ends in `_contact`,
+parent_contact_id MUST be non-null, and the referenced row's contact_type
+MUST be the matching organization-level type (e.g., om_provider_contact's
+parent must have contact_type = 'om_provider'). The mechanism was added by
+Decision 20 to enable the authorized-agent agency check (per Decision 20.4)
+but applies to all matched pairs.
+
+#### Customer-O&M Provider relationship: linked_om_provider_id
+
+Customer rows (contact_type = 'customer') carry an additional column capturing
+their currently engaged O&M Provider, per Decision 20:
+
+- `linked_om_provider_id` uuid nullable FK -> contacts
+  -- references contacts where contact_type = 'om_provider'
+  -- nullable; not all customers engage an O&M Provider
+
+CHECK / application-layer invariant: when linked_om_provider_id is non-null,
+the referenced contact row MUST have contact_type = 'om_provider'.
+
+The column is updatable when the customer changes O&M Provider; historical
+relationships are preserved through the transaction-time FK + Snapshot Pattern
+on operational tables (claim records, parts orders, documents capture the O&M
+Provider at the moment of action). The current linked_om_provider_id reflects
+only the present state.
+
+Customer-row-scope flexibility: tenants who need per-site O&M Provider
+modeling (one O&M Provider for the inverter side, another for the panel side
+of a single commercial customer) can model this via per-site customer rows.
+Each customer-row-as-site has its own linked_om_provider_id. The single-FK
+choice does not constrain multi-O&M-Provider scenarios; tenants choose their
+customer-row granularity to match their commercial relationships.
+
+#### contact_type immutability discipline
+
+contact_type is effectively immutable per row. If a contact's operational
+role changes (rare — e.g., a customer_contact who becomes a subcontractor_
+contact at a different company), a new contact row is created rather than
+UPDATE on the existing row. Server Action layer enforces this discipline;
+the schema does not.
+
+This discipline matters for derivable-not-stored patterns (Decision 20.4):
+operational tables capture actors via contact_id, and downstream queries
+derive role through contact_type lookup. The discipline ensures the actor's
+contact_type at the moment of query equals the actor's contact_type at the
+moment of action.
 
 ### Tenant users are not contacts
 
