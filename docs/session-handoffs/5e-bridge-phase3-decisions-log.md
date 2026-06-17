@@ -2208,6 +2208,508 @@ This Decision resolves Cat 3 backlog item #1 (ALA signature capture
 mechanism). Remaining Cat 3 backlog: eight items.
 
 ---
+
+## Decision 20: O&M Provider as contact_type, Authorized-Agent Relationship, and Customer-O&M Authorization Document Requirement
+
+**Decided in Session A (Cat 3 backlog resolution).**
+
+### Context
+
+Cat 3 backlog item #3 surfaced an open architectural question flagged
+at line 2248 of v2's architecture reference (within Parts Claim
+context): "The contact_type for the FK is the open question — Item
+16's eight Phase 1 values include subcontractor_contact, which could
+fit, but a dedicated om_provider value may be cleaner. Resolving the
+contact_type is a downstream decision."
+
+The question scope expanded during architectural drafting. O&M
+Providers are not simply another contact category — operational
+reality is that each claimant typically engages an O&M Provider who
+manages warranty matters on the customer's behalf and is contractually
+authorized to act as the customer's agent for warranty claims, parts
+orders, repair coordination, and related interactions.
+
+This Decision resolves the contact_type question, the customer-O&M
+Provider relationship structure, the authorized-agent role capture
+mechanism, the matched-pair traversal mechanism, the v1 operational
+regime for binding-commitment agency, and surfaces a new Cat 3
+backlog item (#9) for the Customer-O&M Authorization document
+architecture parallel to ALA.
+
+The Decision is informed by chat 4's independent architectural read
+which surfaced two substantive concerns (claim-submitter traceability
+gap, v1-to-Cat-3-#9 operational gap) plus refinements on traversal
+mechanism, contact_type immutability, customer-row-scope flexibility,
+and Cat 3 #9 scope. All concerns and refinements have been integrated
+into the locked commitments.
+
+### Question
+
+What contact_type captures O&M Providers in the unified contacts
+directory, how is the customer-O&M Provider relationship structured,
+how is authorized-agent role recorded in transactions, how is the
+matched-pair traversal handled, and what preconditions govern O&M
+Provider agency on the customer's behalf at v1 and post-Cat-3-#9?
+
+### Resolution
+
+Ten architectural commitments.
+
+**20.1: New contact_type values for O&M Provider follow the matched-
+pair convention.**
+
+Add two values to the Phase 1 contact_type enum on the contacts
+table:
+
+- om_provider — the O&M Provider organization
+- om_provider_contact — individual contacts within an O&M Provider
+  organization
+
+The Phase 1 contact_type enum grows from eight values to ten. The
+matched-pair convention follows the established Phase 0 Item 16
+pattern (customer + customer_contact, subcontractor +
+subcontractor_contact, vendor + vendor_contact).
+
+Application-layer validation enforces the enum at row insert. The
+CHECK constraint on contact_type is updated to include the two new
+values.
+
+**20.2: O&M Provider is recognized as a distinct operational party.**
+
+O&M Providers are operationally distinct from subcontractors (the
+party that installed the system) and customers (the end-customer
+who owns it). O&M Providers operate and maintain the warrantied
+system day-to-day, are typically the first responders to defects,
+and act as the authorized agent of the customer for warranty matters
+per the customer's contractual engagement with them.
+
+**20.3: linked_om_provider_id captures the customer's CURRENT
+authorized O&M Provider, with customer-row-scope flexibility.**
+
+A new column on the customer contact row captures the customer's
+currently engaged O&M Provider:
+
+- linked_om_provider_id uuid nullable FK -> contacts (where
+  contact_type = 'om_provider')
+
+Nullable because not all customers have an O&M Provider; some
+self-manage. Updatable when the customer changes O&M Provider;
+historical relationships preserved through transaction-time FK +
+Snapshot Pattern on claim/parts-order/document records.
+
+CHECK / application-layer invariant: when linked_om_provider_id is
+non-null, the referenced contact row MUST have contact_type =
+'om_provider'.
+
+Customer-row-scope flexibility: a tenant who needs per-site O&M
+Provider modeling (e.g., one O&M Provider for the inverter side
+and another for the panel side of a single commercial customer)
+can model this via per-site customer rows — each customer-row-as-
+site has its own linked_om_provider_id. The single-FK choice does
+not constrain multi-O&M-Provider scenarios; tenants choose their
+customer-row granularity to match their commercial relationships.
+
+If a tenant genuinely cannot model their multi-provider scenario
+as multiple customer rows, the deferral question becomes active
+(see Open architectural questions deferred).
+
+**20.4: Authorized-agent role is INFERABLE from actor contact_type
+with traversal through parent_contact_id; no explicit flag column.**
+
+Transaction actor capture follows the established v2 convention.
+Every claim, parts order, ALA document, Service Report, Customer
+Work Authorization, and similar transaction records an actor via
+contact_id (the contact who performed the action). The agency
+check is:
+
+- actor's contact_type IN ('om_provider', 'om_provider_contact')
+- AND (if om_provider_contact, traverse parent_contact_id to find
+  parent om_provider)
+- AND that om_provider matches customer.linked_om_provider_id
+
+The traversal mechanism requires parent_contact_id on contact rows
+(see 20.10).
+
+No explicit "acting as agent" boolean flag is added to operational
+tables. The role is queryable through the contacts table lookup;
+adding a flag would bloat operational tables with derivable data.
+If reporting needs surface that argue for the explicit flag at
+scale, revisitable. For v1, derivable is sufficient.
+
+Contact_type immutability: contact_type is effectively immutable
+per row. If a contact's operational role changes (rare), a new
+contact row is created rather than UPDATE on the existing row.
+Server Action layer enforces; schema does not. This discipline is
+what makes "derivable, not stored" sound across time — the actor's
+contact_type at the moment of query equals the actor's contact_type
+at the moment of action.
+
+**20.5: Pre-build addition with no migration burden.**
+
+The contacts table established by Phase 0 Item 16 is not yet built.
+The two new contact_type values (20.1), the linked_om_provider_id
+column (20.3), and the parent_contact_id column (20.10) all join
+the application-layer enum, CHECK constraints, and table schema at
+table-creation time as part of the original migration. No
+retroactive migration is required.
+
+**20.6: O&M Provider as unified directory entry, carved into
+INFORMATIONAL and BINDING-COMMITMENT operational contexts.**
+
+The om_provider contact_type is the canonical directory entry for
+O&M Providers across all operational contexts. The operational
+contexts are carved into two categories:
+
+**INFORMATIONAL contexts (available at v1):**
+
+- Parts Claim ship-to (the original line 2248 flag) — Decision 20
+  resolves the contact_type, no precondition needed
+- Claim submitter — claim filing by O&M Provider is informational;
+  the claim is filed in the customer's name with the O&M Provider's
+  submitter capture
+- Inspection site contact — on-site coordinator role; informational
+- Communications recipient — status updates, repair coordination
+  notifications
+
+**BINDING-COMMITMENT contexts (GATED until Cat 3 #9 resolves):**
+
+- ALA acceptance by O&M Provider
+- Customer Work Authorization approval by O&M Provider
+- Service Report customer-side review (acceptance or dispute) by
+  O&M Provider
+
+For the gated contexts at v1: the binding-commitment Server Actions
+verify the actor's contact_type and BLOCK the action with a
+"O&M Provider binding-commitment agency is not yet supported"
+error if the actor is om_provider or om_provider_contact. The
+customer must perform the binding-commitment action directly until
+Cat 3 #9 lands. This is the architectural commitment to gated-
+until-#9-lands operational regime (see 20.7).
+
+**20.7: v1 operational regime: binding-commitment O&M Provider
+agency is BLOCKED until Cat 3 #9 lands.**
+
+The Customer-O&M Authorization document is REQUIRED as a precondition
+for O&M Provider agency in binding-commitment contexts. The document
+captures the customer's acknowledgment of four explicit commitments:
+
+(a) The customer authorizes the O&M Provider to act on the
+    customer's behalf for warranty matters
+(b) The customer understands they will NOT be notified for ALA-type
+    events and other agent-handled binding decisions
+(c) The customer acknowledges that any decision or agreement
+    entered into by the O&M Provider is binding on the customer
+(d) The customer remains ultimately responsible for the consequences
+    of decisions made by the O&M Provider on their behalf
+
+At v1, the document mechanism does NOT exist; it is architecturally
+deferred to Cat 3 #9. Without the document mechanism, the
+precondition cannot be operationally satisfied within the platform.
+
+v1's operational regime resolves this gap by GATING binding-
+commitment O&M Provider agency entirely:
+
+- O&M Providers can participate as informational contacts (the
+  four contexts in 20.6)
+- O&M Providers CANNOT act as agents in binding-commitment contexts
+  (the three contexts in 20.6); the customer must act directly
+- Tenants who require binding-commitment O&M Provider agency must
+  wait for Cat 3 #9 to land
+
+This is the architecturally clean resolution. Alternatives
+considered (tenant attestation as a transitional regime; soft-allow
+with retroactive backfill) were rejected: the tenant-attestation
+regime creates a transitional accommodation that is operationally
+difficult to deprecate when Cat 3 #9 lands; the soft-allow regime
+creates retroactive authorization complexity that compounds.
+
+Gated-until-#9-lands matches v2's discipline of architectural
+integrity over operational immediacy. Cat 3 #9 should be
+prioritized accordingly.
+
+The "ultimately responsible" mechanism in 20.7(d) is downstream
+legal terms-and-conditions territory — the document architecture's
+job is to preserve the customer's acknowledgment in an audit-
+defensible form (signed, dated, content-snapshotted parallel to
+ALA). The legal mechanism for enforcing responsibility is governed
+by the warranty contract and applicable law, not by the document
+architecture. Cat 3 #9 should note that tenants who want specific
+recourse language include it in their per-tenant template, parallel
+to ALA template configuration.
+
+**20.8: Cat 3 #9 surfaced — Customer-O&M Authorization document
+architecture (expanded scope).**
+
+A new Cat 3 backlog item is added: #9 Customer-O&M Authorization
+document architecture. Scope parallel to ALA System (Decision 19)
+PLUS the additional mechanics surfaced during Decision 20:
+
+Core scope (parallel to ALA):
+
+- Per-tenant template architecture (templates table and documents
+  table)
+- Per-tenant configurable acknowledgment text capturing the four
+  commitments from 20.7
+- Signature capture mechanism (likely reusing Decision 19's
+  in_platform_widget with typed-name-fallback for accessibility
+  compliance — ADA and equivalent)
+- Customer-facing tokenized signing flow (Stateless Tokenized
+  Interaction Pattern, likely seventh canonical use depending on
+  sequencing)
+- Operational state machine (unsigned, signed, voided, superseded)
+- Audit defensibility — the signed authorization is the legal
+  defense if a customer ever disputes that they agreed to let the
+  O&M Provider sign anything on their behalf
+
+Voiding and superseding mechanics (new scope from Decision 20):
+
+- When a customer changes O&M Provider, the prior authorization is
+  voided; a new authorization must be signed for the new O&M
+  Provider before binding-commitment agency activates for the new
+  provider
+- Mid-claim O&M Provider change handling: when a claim was filed
+  by O&M Provider A acting under Customer X's authorization, and
+  mid-claim Customer X changes to O&M Provider B, the question of
+  whether A's authority on the in-flight claim persists vs whether
+  authority transfers to B vs whether the in-flight claim is frozen
+  pending Customer X's direct action is part of Cat 3 #9's scope
+- Prior decision binding preservation: per 20.7(c), decisions made
+  by O&M Provider A are binding on Customer X when made. Audit-
+  defensibility requires the document architecture preserves A's
+  authorization at the moment of decision via FK + Snapshot to the
+  authorization document, parallel to ALA's content_snapshot
+  pattern. Cat 3 #9 must commit to this snapshot mechanism.
+
+Audit trail for linked_om_provider_id changes (new scope from
+Decision 20):
+
+- When a customer changes O&M Provider, the FK on the customer
+  row updates. Cat 3 #9 should include a change-log mechanism
+  (audit table or trigger-based) to capture when changes happened
+  and what the prior values were. The audit-trail value of
+  historical FK + Snapshot at claim/parts-order level partly
+  compensates but doesn't reconstruct "Customer X changed O&M
+  Provider three times in 2026, here are the dates."
+
+Cross-section dependencies with ALA and Customer Work Authorization
+should be re-examined as part of Cat 3 #9 to ensure consistent
+patterns.
+
+Cat 3 #9 warrants a dedicated architectural session parallel to
+Session 5j (which architected ALA). Estimated scope: 90-150 min
+with possible chat 4 verification round for substantive concerns
+(accessibility, document storage shape, voiding mechanics, mid-
+relationship-change handling, snapshot mechanism, audit trail
+shape).
+
+**20.9: Resolves the line 2248 open architectural question.**
+
+The open question flagged at line 2248 of v2's Parts Claim context
+("The contact_type for the FK is the open question — Item 16's
+eight Phase 1 values include subcontractor_contact, which could
+fit, but a dedicated om_provider value may be cleaner") is resolved
+by 20.1: the dedicated om_provider value is the cleaner answer that
+flag explicitly identified.
+
+The Parts Claim section text at line 2248 requires a targeted
+revision following this Decision's commit to replace the open-
+question framing with the resolved answer.
+
+**20.10: parent_contact_id column on contact rows enables matched-
+pair traversal.**
+
+The matched-pair convention (customer + customer_contact,
+subcontractor + subcontractor_contact, vendor + vendor_contact,
+and now om_provider + om_provider_contact per 20.1) requires a
+parent-child relationship between the organization-level contact
+and the individual contacts at that organization. Phase 0 Item 16
+established the matched-pair convention but did not lock the
+parent-child mechanism.
+
+This Decision adds:
+
+- parent_contact_id uuid nullable FK -> contacts (self-referential)
+  -- references the parent organization contact when this row is
+  --   an individual-contact variant (customer_contact,
+  --   subcontractor_contact, vendor_contact, om_provider_contact)
+  -- null for organization-level rows (customer, subcontractor,
+  --   vendor, om_provider)
+  -- null for non-matched-pair rows (registration_assignee, other)
+  -- CHECK / app-layer invariant: when contact_type ends in
+  --   '_contact', parent_contact_id MUST be non-null and the
+  --   referenced row's contact_type must be the matching
+  --   organization-level type (e.g., om_provider_contact's parent
+  --   must have contact_type = 'om_provider')
+
+The traversal mechanism in 20.4 depends on this column. Without
+parent_contact_id, an om_provider_contact actor cannot be linked
+back to their parent om_provider organization to verify the agency
+match against customer.linked_om_provider_id.
+
+The mechanism is added at the Phase 0 Item 16 level (not Cat 3 #9)
+because it affects ALL matched pairs, not just O&M Provider.
+Pre-build addition; no migration burden.
+
+### Schema additions
+
+**contacts table additions (all pre-build):**
+
+- contact_type enum extended (8 -> 10 values): adds 'om_provider'
+  and 'om_provider_contact' to the existing enum
+- CHECK constraint updated to include the two new values
+- parent_contact_id uuid nullable FK -> contacts (self-referential,
+  per 20.10)
+- CHECK / app-layer invariant on parent_contact_id (see 20.10)
+
+**customer contact row additions:**
+
+- linked_om_provider_id uuid nullable FK -> contacts
+  -- references contacts where contact_type = 'om_provider'
+  -- CHECK / app-layer invariant: when non-null, referenced row's
+  --   contact_type must = 'om_provider'
+
+**Claim Intake submitter capture revision:**
+
+The current Claim Intake submitter capture (submitter_name and
+submitter_email as free-text columns) is revised to FK + Snapshot
+when the actor is a known contact, with free-text fallback for
+one-off third parties. New shape:
+
+- submitter_contact_id uuid nullable FK -> contacts
+  -- references the contact who submitted the claim
+  -- null when the submitter is a one-off third party not in the
+  --   contacts directory
+- submitter_name text NOT NULL
+  -- captured at submission; snapshot of the submitter's name at
+  --   that moment regardless of whether submitter_contact_id is
+  --   populated
+- submitter_email text NOT NULL
+  -- captured at submission; snapshot of the submitter's email at
+  --   that moment regardless of whether submitter_contact_id is
+  --   populated
+
+When submitter_contact_id is populated, downstream workflows can
+traverse to the contact's contact_type to derive whether the
+submission was by the customer directly, by a customer_contact,
+by the O&M Provider (subject to 20.6's INFORMATIONAL vs BINDING-
+COMMITMENT carving), or by another party type. When
+submitter_contact_id is null, the snapshot is the only record;
+agency role cannot be derived because there's no contact reference.
+
+This revision is small (one new column, two existing columns
+retained as snapshot fields) and pre-build (Claim Intake table not
+yet built).
+
+### Cross-section dependencies
+
+- **Phase 0 Item 16 (Unified contacts directory):** contact_type
+  enum grows from 8 to 10 values; linked_om_provider_id added to
+  the customer row shape; parent_contact_id added at contact-row
+  level for matched-pair traversal
+- **Line 2248 (Parts Claim ship-to flag):** resolved by Decision 20
+- **Claim Intake:** submitter capture revised to FK + Snapshot when
+  known contact, free-text fallback for one-off third parties
+- **Customer Work Authorization (Decision 11):** actor capture
+  pattern carries through; O&M Provider as authorized agent BLOCKED
+  at v1 until Cat 3 #9 lands (per 20.6, 20.7)
+- **ALA System (Decision 19):** ALA acceptance by O&M Provider
+  BLOCKED at v1 until Cat 3 #9 lands; flag added in Signature
+  capture mechanism subsection
+- **Service Report Submission:** customer-side review (acceptance
+  or dispute) by O&M Provider BLOCKED at v1 until Cat 3 #9 lands;
+  flag added
+- **Inspections Foundation:** O&M Provider as inspection site
+  contact is INFORMATIONAL (not blocked); contact_type capture is
+  sufficient
+
+### Open architectural questions deferred
+
+- **Customer-O&M Authorization document architecture (Cat 3 #9).**
+  Scope per 20.8. Includes core ALA-parallel architecture, voiding
+  and superseding mechanics, mid-relationship-change handling, prior
+  decision snapshot mechanism, and audit trail for
+  linked_om_provider_id changes.
+
+- **Multiple concurrent O&M Providers per single customer row.**
+  Decision 20 commits to single-FK linked_om_provider_id. If a
+  tenant genuinely cannot model their multi-provider scenario as
+  multiple customer rows (per 20.3's customer-row-scope flexibility),
+  the deferral question becomes active. Trigger for revisit: a
+  tenant who needs multi-provider per single customer row and
+  cannot reasonably model their commercial relationship at the
+  customer-row level. Forward migration to a link table is feasible.
+
+- **Cross-tenant O&M Provider identity reconciliation.** A
+  real-world O&M Provider company may serve customers across
+  multiple WarrantyOS tenants. Under Phase 0 Item 16, contacts is
+  tenant-scoped, so the same real-world O&M Provider has separate
+  contact rows in each tenant's directory. This duplication is
+  operationally correct at v1 (each tenant manages their own
+  directory). If the platform later wants O&M Provider self-service
+  (one O&M Provider company logs in once and sees their work
+  across all tenants they serve), the architecture needs to evolve.
+  Known forward-evolution question; not actionable at v1.
+
+- **Scoped authorization (binary vs scope-qualified at v1).**
+  Decision 20 commits to binary authorization at v1 — an O&M
+  Provider is authorized for all binding-commitment contexts or
+  for none. A customer might want to authorize their O&M Provider
+  for some contexts but not others (e.g., parts orders yes, ALA
+  decisions no), or for low-dollar repairs but require direct
+  customer approval for high-dollar repairs. v1 does not support
+  scoped authorization; the document architecture (Cat 3 #9) can
+  grow scope/threshold fields if operational pressure surfaces.
+
+- **O&M Provider self-service portal.** If the platform later
+  wants O&M Providers to have their own login (rather than acting
+  on customer's behalf via tokenized flows), this is substantial
+  architectural work. Not in v1 scope.
+
+### Decision implications for already-committed sections
+
+**Phase 0 Item 16 (Unified contacts directory) section:** schema
+update to add the two new contact_type values, the
+linked_om_provider_id column on customer rows, and the
+parent_contact_id column on contact rows. Section narrative updated
+to document the matched-pair extension, the linked_om_provider_id
+purpose with customer-row-scope flexibility note, the
+parent_contact_id traversal mechanism, and the contact_type
+immutability discipline.
+
+**Parts Claim section** (line 2248 area): targeted revision to
+replace the open-question framing with the resolved Decision 20
+answer.
+
+**Claim Intake section:** submitter capture revision per Decision 20
+schema additions. Small surgical update — adds submitter_contact_id
+column, retains submitter_name and submitter_email as snapshot
+fields.
+
+**ALA System section:** flag added to the Signature capture mechanism
+subsection that O&M Provider acceptance is BLOCKED at v1 until
+Cat 3 #9 (Customer-O&M Authorization document architecture) lands.
+Light touch addition.
+
+**Customer Work Authorization section:** parallel flag added that
+O&M Provider approval is BLOCKED at v1 until Cat 3 #9 lands. Light
+touch addition.
+
+**Service Report Submission section:** parallel flag added that
+O&M Provider customer-side review (acceptance or dispute) is BLOCKED
+at v1 until Cat 3 #9 lands. Light touch addition.
+
+**Inspections Foundation section:** no flag needed; O&M Provider as
+inspection site contact is INFORMATIONAL (per 20.6).
+
+Section revisions land in subsequent commits following this
+Decision's commit.
+
+This Decision resolves Cat 3 backlog item #3 (O&M Provider
+contact_type). It surfaces Cat 3 backlog item #9 (Customer-O&M
+Authorization document architecture). Remaining Cat 3 backlog: nine
+items.
+
+---
 ## Future decisions
 
 Decisions 17+ will be appended above this section as triage-and-resolve
