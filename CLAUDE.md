@@ -83,7 +83,7 @@ remote has been baselined first. This is expected to be handled in
 Phase 4. Surface it; do not work around it.
 
 See Phase 3 Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log.md)
-and the Data Migration Tooling section in docs/architecture-reference-v2.md
+and the Database Migration Tooling section in docs/architecture-reference-v2.md
 for the locked baseline procedure, the six-gate pre-procedure verification
 (including drift verification per Decision 22.9), the six named failure
 modes A through F, the Mode C gating procedure (per Decision 22.10), and

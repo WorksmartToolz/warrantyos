@@ -3246,11 +3246,11 @@ detected after repair commands have run with the wrong CLI version:
 case-by-case investigation based on actual observed behavior; may
 require Mode C intervention.
 
-**22.6: Documentation location — new section "Data Migration
+**22.6: Documentation location — new section "Database Migration
 Tooling" in v2.**
 
 Decision 22 adds a new section to v2's architecture reference titled
-"Data Migration Tooling." This section was previously flagged as
+"Database Migration Tooling." This section was previously flagged as
 Tier 4 cross-cutting future work; Decision 22 advances it.
 
 The section is the authoritative reference for migration tooling
@@ -3283,7 +3283,7 @@ Decision 22 commits but before baseline is executed, the stop-point
 text is updated to cross-reference Decision 22's documented
 procedure:
 
-"See Decision 22 and the Data Migration Tooling section for the
+"See Decision 22 and the Database Migration Tooling section for the
 locked baseline procedure. STOP and surface this hazard if asked
 to push migrations to the remote until baseline is verified
 complete."
@@ -3336,7 +3336,7 @@ handoff entry -> CLAUDE.md update -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four, Phase 4 work proceeds normally and the stop-point becomes
-historical context preserved in the Data Migration Tooling section.
+historical context preserved in the Database Migration Tooling section.
 
 **22.9: Drift verification — the critical pre-baseline gate.**
 
@@ -3440,12 +3440,12 @@ transition gating.
 - **CLAUDE.md (project-level operational rules):** Stop-point text
   updated per 22.7. Stop-point itself remains in force until Phase
   4 transition criteria are satisfied per 22.8.
-- **New section "Data Migration Tooling" in architecture-reference-
-  v2.md:** Per 22.6. Section is added to v2 by Decision 22.
+- **New section "Database Migration Tooling" in architecture-
+  reference-v2.md:** Per 22.6. Section is added to v2 by Decision 22.
 - **Decision 10 (Migrations as canonical schema, schema.sql as
   generated artifact):** Schema.sql regeneration is verified as
   part of the Phase 4 transition (22.8 condition 2). Cross-
-  referenced from the new Data Migration Tooling section.
+  referenced from the new Database Migration Tooling section.
 
 ### Open architectural questions deferred
 
@@ -3477,11 +3477,11 @@ transition gating.
 
 ### Decision implications for already-committed sections
 
-**New section in v2's architecture reference:** Data Migration
+**New section in v2's architecture reference:** Database Migration
 Tooling. Section content per 22.6.
 
 **CLAUDE.md stop-point evolution per 22.7:** Cross-reference
-updated to point to Decision 22 and the new Data Migration Tooling
+updated to point to Decision 22 and the new Database Migration Tooling
 section. Stop-point itself remains in force.
 
 These land in subsequent commits this session if pacing permits,
@@ -3490,7 +3490,7 @@ or in a follow-up session if pacing requires deferral.
 This Decision resolves Cat 3 backlog item #2 (Hosted-DB-no-migration-
 history hazard) at the architectural commitment level. The procedure
 itself executes when Phase 4 begins, which is downstream of this
-Decision. Remaining Cat 3 backlog: seven items.
+Decision. Remaining Cat 3 backlog: six items.
 
 ---
 ## Future decisions

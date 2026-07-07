@@ -4369,12 +4369,15 @@ through tokenized link consumption together preserve the
 authorization's defensibility.
 
 This signature mechanism is locked for Work Authorization specifically.
-The ALA signature mechanism — flagged as an open architectural question
-in the ALA System section — is held as a separate question because
-ALA's assumption of financial liability may warrant a different
-signature mechanism (e.g., e-signature service integration, wet
-signature). Work Authorization's typed-name-plus-checkbox is locked for
-this entity and does not pre-decide ALA's.
+The ALA signature mechanism is locked separately by Decision 19
+(Accept/Decline decision + atomic signature capture at Accept +
+Decline-Recant Window per tenant setting). The two mechanisms are
+architecturally distinct because ALA's assumption of financial
+liability warrants tokenized-interaction ceremony with explicit
+Accept/Decline framing and a recant window, while Work
+Authorization's approval-of-on-site-activity fits typed-name-plus-
+checkbox atomicity. Neither pre-decides the other; both are locked
+at their respective architectural layers.
 
 The customer_token and customer_token_expires_at columns store the
 tokenized link per the Stateless Tokenized Interaction Pattern's
