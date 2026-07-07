@@ -1,3 +1,5 @@
+**Last updated:** 102d122 2026-06-17
+
 # Claude Code rules for the WarrantyOS repo
 
 These rules govern how Claude Code should execute work in this repo.

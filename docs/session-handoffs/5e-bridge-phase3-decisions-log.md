@@ -1,3 +1,5 @@
+**Last updated:** 102d122 2026-06-17
+
 # 5e-Bridge Phase 3 Decisions Log
 
 This file extends the Phase 2 decisions log (Decisions 1-10, captured in

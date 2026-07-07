@@ -1,3 +1,5 @@
+**Last updated:** 102d122 2026-06-17
+
 # WarrantyOS — Architectural Reference (v2, Prototype Phase)
 
 > **Draft status:** v2 in progress. This document expands and completes v1
