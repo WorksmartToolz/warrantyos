@@ -3493,6 +3493,830 @@ itself executes when Phase 4 begins, which is downstream of this
 Decision. Remaining Cat 3 backlog: six items.
 
 ---
+
+## Decision 23: Warranty Registration Lifecycle Trigger Timing, Actual Start Date Semantics, and Registration Status State Machine (Cat 3 #7 + #6 resolved)
+
+**Decided in Session C (Cat 3 backlog resolution).**
+
+### Context
+
+Cat 3 backlog item #7 (contractual_date_manual creation-timing) opened
+with a narrow schema question — when does the warranty_registrations
+row come into existence for `contractual_date_manual` trigger source.
+v2 flagged the question as unresolved in the Warranty Registration
+section's Clock-event interactions subsection: "what specifically
+happens at firing time, including whether the registration record is
+created at project creation or at prep-event firing, is not specified
+by any locked source."
+
+Andre's operational framing during Session C substantially expanded
+the scope. The resolution touches:
+
+- The semantic role of `trigger_date` on projects (single confirmed
+  contractual date entered at project creation for
+  `contractual_date_manual`)
+- The introduction of `actual_start_date` on warranty_registrations
+  (the operational-reality date the warrantor confirms the warranty
+  actually started, distinct from the contractual trigger_date)
+- The registration lifecycle timing (registration row is created when
+  the `registration_prep_pre_trigger` clock event fires, not at
+  project creation)
+- The registration status state machine (Cat 3 #6, now resolved as a
+  byproduct of #7's resolution)
+- Claim eligibility interaction with actual_start_date confirmation
+  status
+- Migration/import handling for projects missing trigger_date
+- Warranty coverage start_date derivation using immutable snapshot
+  semantics with COALESCE derivation at query time
+- Section 7 rejection handling within the state machine
+
+The scope expansion is architecturally justified because Andre's
+operational framing surfaced a first-principle-level commitment:
+**the warranty starts according to contract, not warrantor activity.**
+Platform state must not create barriers to customer rights that the
+contract grants. This principle is documented within Decision 23 as
+rationale for specific commitments; a future Decision may elevate it
+to a first-principle-level architectural anchor if it recurs across
+other domains. Flagged for consideration in a later session.
+
+Cat 3 #6 (Registration status enum richer values) was on the backlog
+as a separate item chained after #7. Andre's operational answer to a
+mid-drafting question locked #6's resolution — the state machine is
+`pre_activation`, `assigned`, `active`, `rejected` (four flat states).
+Because #6's resolution is tightly coupled to #7's registration
+lifecycle timing, both are resolved together in this Decision rather
+than requiring two separate Decisions.
+
+The Decision is informed by chat 4's independent architectural read
+which surfaced ten substantive concerns integrated into the locked
+commitments below: 23.2's scope restriction to trigger sources with
+known-at-creation trigger_date, COALESCE canonicalization as an
+application invariant, precise "atomic" language for 23.3, 23.8's
+cross-reference expectation, operational queue commitment for
+pre_activation, explicit downstream guards for permissive migration,
+derived-not-manual commitment for dual flagging, Section 7 rejection
+modeled as a fourth state, minor migration hygiene, and temporal
+validity commitment for actual_start_date.
+
+### Question
+
+For `trigger_source = 'contractual_date_manual'`: when is the
+warranty_registrations row created, what date semantics govern the
+project and registration entities across the trigger lifecycle, what
+state machine governs the registration's progress (including Section
+7 rejection), how does claim eligibility interact with the
+"warranty starts per contract" principle, and how is migration/import
+handling for missing trigger_date architected?
+
+### Resolution
+
+Fourteen architectural commitments.
+
+**23.1: `projects.trigger_date` is populated at project creation for
+`contractual_date_manual` trigger source.**
+
+At project creation for `contractual_date_manual`, the warrantor
+enters the contractually-agreed date the warranty is scheduled to be
+active. This date populates `projects.trigger_date` at that moment.
+
+This revises the earlier v2 schema comment ("set when trigger_status
+becomes 'confirmed'; null until then"). That comment is accurate for
+`wbs_integration`, `delivery_report_tokenized`, and
+`delivery_report_api` (where trigger_date is populated when the
+trigger event actually happens). For `contractual_date_manual`,
+trigger_date is populated at project creation — the trigger_source
+name itself describes this: it's the manually-entered contractual
+date.
+
+`trigger_status` remains `pending` at project creation for
+`contractual_date_manual` because the warranty hasn't started yet
+(the date is in the future). State transitions of `trigger_status`
+are governed by other events, not by the calendar reaching
+`trigger_date`.
+
+The trigger_date column comment in the projects table schema MUST be
+revised as part of Decision 23's schema commitment. Comment revision:
+
+    trigger_date                date nullable
+                                -- For 'contractual_date_manual':
+                                --   populated at project creation
+                                --   with the contractually-agreed
+                                --   warranty active date. Non-null
+                                --   at creation (application-layer
+                                --   enforcement, exception via
+                                --   migration path per 23.11).
+                                -- For 'wbs_integration',
+                                --   'delivery_report_tokenized',
+                                --   'delivery_report_api': populated
+                                --   when trigger_status becomes
+                                --   'confirmed' (trigger event
+                                --   actually happens). Null until
+                                --   then.
+
+**23.2: A `registration_prep_pre_trigger` clock event is inserted at
+project creation ONLY for trigger sources where trigger_date is
+known at project creation.**
+
+This commitment applies to `contractual_date_manual` and to
+`wbs_integration` in the "known-in-advance" case where the integration
+poller has captured the milestone date at project creation.
+
+At project creation for these sources, the platform calculates
+`trigger_date - registration_lead_time_days` (per-tenant configurable
+setting, default 21) and inserts a clock_events row of type
+`registration_prep_pre_trigger` with that value as `fires_at`. The
+entity_type = 'project', entity_id = the project's id.
+
+The clock event is a scheduled reminder — Decision 9's Clock Event
+Infrastructure holds the row until the hourly pg_cron poll detects
+`fires_at` is in the past AND `status = 'pending'`. On that poll, the
+dispatcher runs.
+
+For `delivery_report_tokenized`, `delivery_report_api`, and
+`wbs_integration` when trigger_date is NOT known at project creation
+(supply-only shape and polling-not-yet-completed shape), the
+mechanism is different and locked in Phase 0 Item 17 and current v2:
+the warranty_registrations row is created SYNCHRONOUSLY when the
+trigger event occurs (buyer report, carrier API confirmation, poller
+detection) via a Server Action, not via a clock event. This
+distinction is preserved by Decision 23; the clock-event-driven
+mechanism applies only where trigger_date is known at creation.
+
+The uniform semantic (trigger_date is the operative warranty start
+date) holds across all trigger sources. Only the timing of trigger_date
+population — and consequently the mechanism for scheduling registration
+creation — varies by trigger source.
+
+**23.3: The warranty_registrations row is created when the
+`registration_prep_pre_trigger` clock event fires (for trigger
+sources where 23.2 applies).**
+
+When the dispatcher runs the `registration_prep_pre_trigger` event,
+its Server Action performs an atomic write:
+
+1. Creates the `warranty_registrations` row associated with the
+   project (project_id populated, tenant_id denormalized per Standard
+   RLS Pattern)
+2. Assigns the registration to an assignee. Assignment populates one
+   of `assigned_to_contact_id` or `assigned_to_user_id` per the
+   dual-FK model. Captures assignee snapshots
+   (`assigned_to_name_snapshot`, `assigned_to_email_snapshot`,
+   `assigned_to_phone_snapshot`) per the FK + Snapshot Pattern
+3. Sets `warranty_registrations.status = 'assigned'`
+4. Sends notification to the assignee
+
+"Atomic" here means the Server Action commits row+state in a single
+database write, NOT transactional all-or-nothing across all four
+effects. The distinction matters: if the row creation succeeds but
+assignment fails (contact FK invalid, assignee soft-deleted between
+dispatcher scheduling and firing, notification service down), the
+row exists with `status = 'pre_activation'` per 23.7's edge-case
+disposition. The atomic commit succeeds to whichever state is
+achievable given the partial-failure conditions.
+
+The normal path (all four effects succeed) produces a row directly
+in `assigned` state. The `pre_activation` state exists as a fallback
+for the partial-failure edge case.
+
+Between project creation and the clock event firing, the registration
+row does NOT exist. The project exists (with trigger_date recorded),
+but no registration exists yet.
+
+The assignment mechanism (how the Server Action determines the
+assignee — pre-configured default per tenant, assignment task
+surfaced to team admins, operator selection) is downstream operational
+scope. Decision 23 locks that assignment happens as part of the
+atomic operation; the mechanism itself is Phase 4 / operational
+drafting.
+
+**23.4: `warranty_registrations.actual_start_date` is a new nullable
+column with no default.**
+
+Schema addition to warranty_registrations:
+
+    actual_start_date         date nullable
+                              -- populated by the warrantor when they
+                              --   confirm the warranty actually started
+                              --   operationally; null until confirmed;
+                              --   no default value
+
+The column is nullable with no default (not a sentinel value like
+1900-01-01). Application code checks `IS NULL` to determine whether
+actual_start_date has been confirmed.
+
+Purpose: `actual_start_date` captures the date the warrantor has
+confirmed the warranty operationally started, which may or may not
+equal `trigger_date` (the contractually-agreed date). Warrantor
+confirmation happens with no fixed timing — could be before, at, or
+after trigger_date. The warrantor confirms whenever they get the
+information.
+
+**23.4a: No temporal constraint bounds actual_start_date relative to
+trigger_date.**
+
+The relationship between actual_start_date and trigger_date is
+operationally unconstrained. Both cases are valid:
+
+- actual_start_date BEFORE trigger_date: warranty started
+  operationally earlier than the contractual date. The customer
+  benefits from the earlier date via COALESCE derivation per 23.5,
+  which favors customer rights per 23.8's principle.
+- actual_start_date AFTER trigger_date: warranty started
+  operationally later than the contractual date. During the interim,
+  the customer's warranty is still active per the contract
+  (COALESCE falls back to trigger_date). The dual flagging model
+  (23.10) surfaces the gap for warrantor follow-up.
+
+No database CHECK constraint bounds actual_start_date relative to
+trigger_date. The gap can be arbitrarily large — no implicit upper
+bound. Warrantors decide operationally whether specific gaps warrant
+investigation or intervention; the platform does not enforce timing
+constraints on actual_start_date confirmation.
+
+**23.5: Warranty coverage `start_date` is populated at coverage
+creation with `trigger_date`. Coverage rows are immutable snapshots;
+the effective start date is derived at query time via COALESCE.**
+
+At coverage creation, `warranty_coverages.start_date` is populated
+with the current value of `projects.trigger_date`. This is a snapshot
+at coverage creation.
+
+Later, if `actual_start_date` is confirmed and differs from
+trigger_date, coverage rows are NOT updated. Coverage `start_date`
+remains as the trigger_date snapshot captured at coverage creation.
+
+The effective start date for warranty calculations (claim eligibility,
+end_date derivation, expiry warnings) is derived at query time via
+COALESCE:
+
+    effective_start_date = COALESCE(
+        warranty_registrations.actual_start_date,
+        warranty_coverages.start_date
+    )
+
+Where `actual_start_date` is on the parent warranty_registrations row.
+When actual_start_date is null, the coverage's snapshotted start_date
+(equal to trigger_date at snapshot time) is used. When
+actual_start_date is confirmed, it overrides.
+
+This preserves audit-defensibility: coverage rows are historical
+records of what was known at creation time. Effective start is
+derived, not stored. Historical accuracy is preserved even when
+actual_start_date is confirmed after coverages were created and after
+claims were filed.
+
+**23.5a: The COALESCE derivation is an APPLICATION INVARIANT.**
+
+Application code MUST use COALESCE(warranty_registrations.actual_start_date,
+warranty_coverages.start_date) for effective start date derivation in
+ALL of the following contexts:
+
+- Claim eligibility calculations
+- Coverage window calculations
+- Warranty period displays to warrantors and customers
+- end_date derivation (Cat 3 #8, downstream)
+- Expiry warning firing calculations
+
+Application code MUST NEVER read `warranty_coverages.start_date`
+directly for effective start date purposes. Reading the snapshot
+directly bypasses the derivation and produces incorrect effective
+start dates whenever actual_start_date has been populated. This is a
+silent data corruption failure mode.
+
+This invariant is architecturally comparable to Decision 19's atomic
+Accept-and-Signature invariant. It applies uniformly across all code
+paths that touch effective start date semantics.
+
+An alternative implementation approach that would eliminate the
+application invariant: implement effective_start_date as a PostgreSQL
+generated column on warranty_coverages (computed from a join to
+warranty_registrations) or as a view. This would enforce the
+derivation at the schema level; application code would read a single
+column. Adds implementation complexity but eliminates the cross-cutting
+invariant. Flagged as a Phase 4 implementation option; Decision 23
+does not commit to either the invariant-enforced-in-app or the
+generated-column path. The commitment is the derivation semantic;
+the enforcement mechanism is a Phase 4 implementation choice.
+
+**23.6: Warranty coverages are created during the prep window by the
+assignee.**
+
+Coverages are child rows of warranty_registrations. Under Decision
+23's timing model, the warranty_registrations row is created when the
+prep event fires (~21 days before trigger_date for the
+`contractual_date_manual` case). Coverages come into existence during
+the prep window that follows.
+
+The assignee, during their prep work, configures coverages by drawing
+down warranty types from the tenant's warranty_types list, setting
+term_years for each, and populating coverage rows. Coverage creation
+is part of the prep work that must complete before Section 7
+activation.
+
+At coverage creation, each coverage row's `start_date` is populated
+with the current `projects.trigger_date` value (per 23.5). Each
+coverage row's `end_date` is derived from `start_date + term_years`
+(the mechanism for this derivation is Cat 3 #8, still on the backlog).
+
+**23.7: warranty_registrations.status state machine is
+`pre_activation`, `assigned`, `active`, `rejected` (four flat
+sequential states).**
+
+This commitment resolves Cat 3 #6 (Registration status enum richer
+values) as a byproduct of Decision 23's registration lifecycle work.
+
+State machine:
+
+- `pre_activation` — the registration row exists but no assignee has
+  been captured. This state is reserved for edge cases where the
+  clock event dispatcher's atomic operation partially failed
+  (assignment failure, notification service down, etc.). The row
+  exists in the database, but the atomic operation did not fully
+  complete. Not entered during normal operation.
+
+- `assigned` — an assignee has been captured on the registration.
+  Assignee is working on prep (configuring coverages, gathering
+  Section 7 documentation, etc.). This is the state most registrations
+  spend their prep window in.
+
+- `active` — Section 7 activation has passed, WarrantyID has been
+  issued, `activated_at` is populated. Registration is live.
+  Downstream claims, coverages billing time toward expiry, and
+  customer-facing communications reference the WarrantyID.
+
+- `rejected` — Section 7 activation attempt was rejected by the
+  reviewer. The registration is not active; the assignee must revise
+  and resubmit. This is a transient state (see transitions below).
+
+Transitions:
+
+- doesn't-exist -> `assigned` (normal path, per 23.3's atomic
+  Server Action)
+- doesn't-exist -> `pre_activation` (edge case, when assignment fails
+  during dispatcher)
+- `pre_activation` -> `assigned` (when assignment completes after
+  edge-case entry, via manual intervention or retry mechanism)
+- `assigned` -> `active` (when Section 7 activation gate passes)
+- `assigned` -> `rejected` (when Section 7 activation attempt is
+  rejected)
+- `rejected` -> `assigned` (when the assignee revises and resubmits;
+  Section 7 rejection loops back to prep state for revision)
+
+No transition from `active` to any earlier state. Retirement or
+cancellation of an active registration is a separate concern not
+covered here.
+
+No transition from `rejected` to `active` directly; rejection always
+routes back through `assigned` for revision before another activation
+attempt.
+
+The CHECK constraint on `warranty_registrations.status` enforces the
+four allowed values.
+
+**23.7a: The `pre_activation` state requires an operational queue
+surface for warrantor operations.**
+
+Because `pre_activation` is an edge-case fallback state where the
+atomic Server Action partially failed, rows in this state require
+active operational attention. A registration sitting in `pre_activation`
+means: the clock event fired, the row was created, but assignment
+did not complete. Something needs to happen to advance the row to
+`assigned`.
+
+Without an operational surface, `pre_activation` rows would silently
+accumulate as an unnoticed operational failure mode.
+
+Decision 23 commits: the platform surfaces an operational queue for
+warrantor team admins showing registrations in `pre_activation` state.
+The queue drives active follow-up to resolve the failed assignment
+(either by manual assignment through an operational UI, or by
+diagnosing and retrying the failed dispatcher path).
+
+The queue's specific UI/UX and the mechanism for resolving
+`pre_activation` rows (manual assignment vs retry) are Phase 4 /
+operational drafting.
+
+**23.8: Warranty starts per contract, not warrantor activity —
+platform state does not block customer rights.**
+
+This commitment is a rationale-level principle informing 23.9 and
+23.10. Documenting it explicitly:
+
+The contract between warrantor and customer specifies when the
+warranty is active. `projects.trigger_date` records the contractual
+date. Warrantor internal delays in confirming operational activation
+(`actual_start_date`) do not shift the customer's contractual rights.
+If the trigger_date arrives before actual_start_date is confirmed, the
+customer's warranty is still active per the contract — the platform
+must not deny claims on the basis of internal state.
+
+This principle is architectural, not just operational. It shapes:
+
+- Claim intake behavior when the target project has trigger_date in
+  the past and actual_start_date null (23.9)
+- Effective start date derivation via COALESCE with trigger_date as
+  fallback (23.5)
+- The dual flagging model (23.10)
+
+The principle is at rationale-level within Decision 23. It may recur
+in future Decisions (claim eligibility rules, warranty expiration
+handling, other customer-facing timing questions). If it does, a
+future Decision may elevate it to a first-principle-level
+architectural anchor comparable to the v1 Core Operational Philosophy
+principles. That elevation is out of scope for Decision 23; flagged
+for consideration.
+
+**Cross-reference expectation: any future Decision that touches
+claim eligibility, coverage window calculations, warranty expiration
+handling, or customer-facing timing MUST reference 23.8 explicitly.**
+Absent this cross-reference discipline, future Decisions could
+inadvertently contradict the warranty-starts-per-contract principle
+by making customer rights conditional on warrantor-side state without
+recognizing 23.8. Decision 23 names this expectation to preserve the
+principle across future architectural work.
+
+**23.9: Claim eligibility uses effective start date via COALESCE with
+trigger_date as fallback.**
+
+For claim eligibility calculations:
+
+    effective_start_date = COALESCE(
+        warranty_registrations.actual_start_date,
+        projects.trigger_date
+    )
+
+Where projects.trigger_date is the contractually-agreed date
+(populated at project creation for `contractual_date_manual`) and
+warranty_registrations.actual_start_date is the warrantor-confirmed
+operational date.
+
+Note: 23.5 defines the same COALESCE pattern operating on
+warranty_coverages.start_date (the snapshot of trigger_date). Both
+patterns are semantically equivalent because coverage.start_date IS
+trigger_date at snapshot time. The distinction: 23.5 governs coverage
+derivations (end_date calculations, coverage windows); 23.9 governs
+claim eligibility. Application code paths may use either derivation
+depending on which parent entity is being queried; both must produce
+the same effective_start_date value for the same registration.
+
+Claim eligibility rules (Cat 3 #1, still on the backlog) will build
+on this effective start date. This commitment establishes the
+derivation; the specific rules for what makes a claim eligible are
+downstream.
+
+The COALESCE with trigger_date as fallback IS the mechanism by which
+the warranty-starts-per-contract principle is enforced. When
+actual_start_date is null (warrantor hasn't confirmed yet), the
+customer's warranty is still active per the contractual trigger_date.
+
+**23.10: Dual flagging model — project-level operational queue AND
+claim-level flagging, both derived-not-manual.**
+
+Two independent surfaces flag the "actual_start_date not yet
+confirmed" condition when it arises operationally:
+
+- **Project-level operational queue.** Projects where trigger_date has
+  passed AND actual_start_date is still NULL surface in an operational
+  queue for warrantor follow-up. The queue drives ongoing operational
+  cleanup independent of any claims filed. Team admins can review the
+  queue and confirm actual_start_date values in batch.
+
+- **Claim-level flagging.** Claims filed against a project where
+  actual_start_date is NULL are accepted normally (per 23.8's
+  warranty-starts-per-contract principle) but individually flagged in
+  the claim intake surface. The reviewer sees "this claim was filed
+  against a project with unconfirmed actual_start_date" as context,
+  which may inform their evaluation but does not block the claim.
+
+Both flags exist because they serve different operational purposes:
+the project-level queue drives proactive follow-up before claims are
+filed; the claim-level flag surfaces context to reviewers evaluating
+specific filed claims. Both flags clear when actual_start_date is
+confirmed.
+
+**Both flags are DERIVED from current state, NOT MANUALLY MAINTAINED.**
+The project-level queue is a query filter over projects
+(`WHERE trigger_date < NOW() AND registration.actual_start_date IS
+NULL`). The claim-level flag is a derived boolean computed at claim
+display time from the same conditions. Neither flag is a stored
+boolean column that could go stale, be manually toggled, or diverge
+from the underlying state. Both flags are always accurate reflections
+of current state.
+
+This derived-not-manual commitment prevents the two flags from
+becoming divergent sources of truth. If either flag were stored as
+state, they could conflict — one flag might be cleared while the
+other remained set, producing inconsistent operator experience.
+Derived flags cannot diverge because they're computed from the same
+underlying columns.
+
+**Claim history preservation:** When a flagged claim is filed, and the
+flag later clears (actual_start_date populated), the claim's current
+flag state clears too. However, the audit trail preserves that the
+claim was flagged at filing time. The specific mechanism (audit table
+entry, timestamped flag history, event log) is downstream operational
+drafting; the architectural commitment is that filing-time flag
+state is preserved in audit-defensible form.
+
+**23.11: Migration/import handling for projects with missing
+trigger_date, with explicit downstream guards.**
+
+Per Decision 8's data migration tooling and Decision 22's operational
+model, some project rows may be migrated into the system with
+`trigger_source = 'contractual_date_manual'` and `trigger_date = NULL`
+because the customer's source data was incomplete at migration time.
+
+Migration handling:
+
+- The project row is created in the system despite missing
+  trigger_date (permissive-with-surfacing model)
+- The `registration_prep_pre_trigger` clock event is NOT created at
+  migration time (no known trigger_date to schedule against)
+- The row surfaces in a "projects missing trigger_date" operational
+  queue for warrantor follow-up
+- When the warrantor later enters the trigger_date via post-migration
+  editing, the Server Action creates the `registration_prep_pre_trigger`
+  clock event at that point (scheduled to fire at
+  `trigger_date - registration_lead_time_days`)
+
+Application-layer enforcement: a project row created through the
+standard Server Action (not migration) MUST have `trigger_date`
+non-null when `trigger_source = 'contractual_date_manual'`. Migration
+is the exception path — Server Action bypass allows migration to
+insert rows with missing trigger_date.
+
+The database CHECK constraint on projects does NOT enforce trigger_date
+non-null for `contractual_date_manual`, precisely because migration
+needs to create these rows. Enforcement is application-layer only.
+
+**Explicit downstream guards:**
+
+Three specific guards must be documented as commitments of the Server
+Action layer that handle migrated projects with missing trigger_date:
+
+1. **Deferred clock event creation.** The Server Action that
+   populates trigger_date on a migrated project must handle the
+   "trigger_date was null, now being populated" case by creating the
+   `registration_prep_pre_trigger` clock event at that point (not at
+   original project creation). This is the retrospective scheduling
+   path.
+
+2. **Cat 3 #1 handoff for in-flight state.** Between migration
+   completion and trigger_date population (whether by warrantor entry
+   or by never happening), the project exists but has no registration
+   and no clock event. Claims may be filed during this in-flight
+   state. Claim eligibility handling for "project exists, trigger_date
+   populated (past), but registration not yet created" is a Cat 3 #1
+   concern; Decision 23 introduces the state (by making registration
+   creation deferred through clock event) and thus flags the Cat 3 #1
+   handoff explicitly.
+
+3. **Past-dated trigger_date handling.** If a warrantor populates
+   trigger_date with a past date (e.g., migrating projects whose
+   contractual dates already occurred), the calculation
+   `trigger_date - lead_time_days` produces a past `fires_at`.
+   Decision 9's clock_events dispatcher fires already-past events on
+   the next poll, so this works — the clock event is created, and
+   the dispatcher fires it on the next hourly poll. Between the
+   trigger_date population and the next dispatcher poll, the project
+   exists without a registration; this is an in-flight state that
+   the Cat 3 #1 handoff (guard 2 above) covers.
+
+These three guards are architectural commitments of Decision 23, not
+downstream operational scope. Server Action implementations for
+project creation, project editing (trigger_date update), and the
+`registration_prep_pre_trigger` dispatcher must honor these guards.
+
+**23.12: Reassignment mechanics are deferred to a downstream Decision.**
+
+The atomic assignment model in 23.3 handles initial assignment when
+the clock event dispatcher fires. Decision 23 does NOT address:
+
+- Reassignment when the current assignee needs to be replaced
+  (assignee left the company, incorrectly assigned, deprovisioned,
+  or otherwise unavailable)
+- Audit trail requirements for reassignment history
+- Notification behavior on reassignment (both to old and new assignee)
+- Whether reassignment can occur in `active` state or only in
+  `assigned` / `rejected` / `pre_activation` states
+
+The atomic model is elegant for initial assignment; reassignment is a
+real edge case that requires its own mechanism. Deferring here
+preserves 23.3's atomic model without introducing complexity beyond
+what Cat 3 #7's scope required.
+
+Flagged for a future Decision (potentially Cat 3 #4 territory, though
+#4 was resolved by Decision 21 and did not cover this).
+
+### Schema additions
+
+Two schema changes to existing tables:
+
+**projects (semantic revision + column comment update):**
+
+- `trigger_date` semantics revised per 23.1. Populated at project
+  creation for `contractual_date_manual`; unchanged for other trigger
+  sources. Application-layer enforcement (via Server Action creating
+  projects, not database CHECK) requires trigger_date non-null when
+  trigger_source is `contractual_date_manual`, except through the
+  migration path per 23.11.
+- Column comment on trigger_date MUST be updated per 23.1's revised
+  wording. This is a schema migration change (`COMMENT ON COLUMN`
+  statement in the Phase 4 migration file).
+
+**warranty_registrations (new column):**
+
+- `actual_start_date date nullable` (no default)
+
+**warranty_registrations (CHECK constraint expansion):**
+
+- The CHECK constraint on `status` must be updated to allow four
+  values: `pre_activation`, `assigned`, `active`, `rejected`. This is
+  a schema migration change.
+
+No changes to warranty_coverages schema. Coverage `start_date` behavior
+is a semantic clarification (23.5) rather than a schema change.
+
+**No data backfill required at migration time.** Existing warranty
+registrations get NULL for actual_start_date at migration time,
+which is the correct initial state (matching "not yet confirmed").
+Phase 4 implementers do NOT need to invent a backfill script.
+
+### Cross-section dependencies
+
+- **Project section** (in v2's architecture-reference-v2.md):
+  - trigger_date semantics revision for `contractual_date_manual`
+    (23.1) with column comment update
+  - Lifecycle subsection needs updates reflecting trigger_date-at-
+    creation semantics for `contractual_date_manual` and
+    Decision 23.3's registration creation timing
+  - Migration/import handling documented in a subsection (23.11)
+    including the three downstream guards
+
+- **Warranty Registration section**:
+  - actual_start_date column added to schema (23.4)
+  - 23.4a temporal validity commitment (no bounds on
+    actual_start_date relative to trigger_date)
+  - Registration status state machine explicitly documented as four
+    flat states (23.7) with all transitions
+  - `pre_activation` operational queue commitment (23.7a)
+  - Clock-event interactions subsection updated to reflect Decision
+    23.2's scope restriction and Decision 23.3's registration-at-prep-
+    event-firing timing (replacing the "not specified by any locked
+    source" flag)
+  - Assignment semantics clarified with precise atomic language (23.3)
+  - Reassignment mechanics deferred (23.12) flagged
+
+- **Warranty Type Coverages section**:
+  - Coverage start_date derivation via COALESCE documented (23.5)
+  - Coverage creation timing during prep window documented (23.6)
+  - Immutability of coverage snapshots documented (23.5)
+  - COALESCE application invariant documented (23.5a)
+
+- **Claim Intake Data Model section** (when drafted; currently Tier 3
+  deferred):
+  - Claim-level flagging for unconfirmed actual_start_date (23.10)
+  - Effective start date derivation via COALESCE (23.9)
+  - warranty-starts-per-contract principle in claim intake acceptance
+    (23.8, cross-reference expectation locked)
+  - In-flight state handling for migrated projects (23.11 guard 2)
+    handoff to Cat 3 #1
+
+- **Feature Flag System (Phase 0 Item 18)**: No changes needed. The
+  `epc_workflow` feature flag already gates `contractual_date_manual`
+  projects; Decision 23 operates within that gated scope.
+
+- **Decision 8 (Data Migration Tooling MVP Scope)**:
+  Migration/import handling for missing trigger_date (23.11) is a
+  post-Decision-8 addendum to Decision 8's Phase 1 import scope.
+  Decision 8 already supports customer-data-import; Decision 23 adds
+  the specific handling for `contractual_date_manual` projects with
+  missing trigger_date.
+
+- **Decision 22 (Database Migration Tooling)**:
+  Decision 23 introduces both a schema change (actual_start_date
+  column) and a comment/semantic change (trigger_date column comment
+  revision per 23.1). Both changes land in a Phase 4 migration file.
+  The migration must include `COMMENT ON COLUMN projects.trigger_date
+  IS ...` statements to update the semantic documentation. Standard
+  Phase 4 operational path applies (Decision 22's ongoing operational
+  mechanics): author migration file locally, test, run supabase db
+  push after baseline complete, verify with schema.sql regeneration.
+  No additional Decision 22 commitments required; the standard path
+  covers it.
+
+- **Cat 3 #1 (Claim eligibility rules)**: Decision 23.9 establishes
+  the effective start date derivation via COALESCE. Cat 3 #1 will
+  build claim eligibility rules on top of this derivation. Decision
+  23.11 guard 2 flags the in-flight state (project exists,
+  trigger_date populated but past, registration not yet created) as
+  a Cat 3 #1 concern that Decision 23 introduces but does not
+  resolve.
+
+- **Cat 3 #8 (end_date derivation mechanism)**: Coverage end_date
+  derivation (from start_date + term_years) remains Cat 3 #8. Decision
+  23.5's immutable-snapshot commitment for coverage start_date holds
+  regardless of the end_date derivation mechanism. Cat 3 #8 must
+  honor the COALESCE application invariant (23.5a) when computing
+  end_date-dependent values.
+
+### Open architectural questions deferred
+
+- **Assignment mechanism at clock event firing (23.3 step 2).** The
+  specific mechanism by which the Server Action determines the
+  assignee — pre-configured default assignee per tenant, assignment
+  task surfaced to team admins, operator selection — is downstream
+  operational scope. Decision 23 locks that assignment happens as
+  part of the atomic operation; the mechanism itself is Phase 4 /
+  operational drafting.
+
+- **What happens to trigger_status when trigger_date is reached.**
+  Decision 23 commits that `trigger_status` state transitions are not
+  automatically driven by the calendar reaching trigger_date. The
+  question of what does drive trigger_status confirmation for
+  `contractual_date_manual` (whether it's tied to actual_start_date
+  confirmation, to a manual reviewer action, or to something else) is
+  flagged for future architectural work.
+
+- **Claim eligibility rules (Cat 3 #1).** Decision 23 establishes the
+  effective start date derivation (23.9) that claim eligibility will
+  use. The specific rules for what makes a claim eligible against a
+  warranty are Cat 3 #1, still on the backlog. Decision 23.11 guard
+  2 flags the in-flight state handoff.
+
+- **Warranty expiration handling.** When the warranty period ends
+  (start + term_years), what happens to coverages, to the ability to
+  file claims, to notifications — all flagged for future architectural
+  work. Decision 23 doesn't touch expiration; it only touches the
+  start side.
+
+- **Actual_start_date corrections after initial confirmation.** If
+  the warrantor confirms actual_start_date and later needs to correct
+  it (data entry error, updated operational information), the
+  correction mechanism is not specified here. Likely path: standard
+  Server Action UPDATE with audit trail; the semantics of what happens
+  to already-filed claims after correction is a follow-on question.
+
+- **Reassignment mechanics (23.12).** Deferred to a future Decision.
+
+- **COALESCE enforcement mechanism (23.5a).** Application invariant
+  vs. PostgreSQL generated column vs. view — Phase 4 implementation
+  choice. Decision 23 commits the derivation semantic; enforcement
+  mechanism is downstream.
+
+- **Section 7 rejection audit trail.** When Section 7 rejects a
+  registration (transition `assigned` -> `rejected`), the rejection
+  reason and rejecting reviewer identity should presumably be captured
+  for audit-defensibility. Mechanism not specified here; downstream
+  operational scope.
+
+### Decision implications for already-committed sections
+
+**Project section (in v2's architecture-reference-v2.md):**
+
+- Lifecycle subsection updates per 23.1, 23.2, 23.11
+- New "Migration and import handling" subsection or paragraph per
+  23.11 including the three downstream guards
+- Schema comment revision on trigger_date per 23.1
+
+**Warranty Registration section:**
+
+- Schema addition for actual_start_date per 23.4
+- 23.4a temporal validity commitment documented
+- Clock-event interactions subsection rewritten per 23.2 (scope
+  restriction) and 23.3 (atomic assignment semantics)
+- New "Registration status state machine" subsection per 23.7 with
+  four states and all transitions
+- New "Pre-activation operational queue" subsection per 23.7a
+- Assignment semantics documented per 23.3 with precise atomic
+  language
+- Reassignment mechanics deferral flagged per 23.12
+
+**Warranty Type Coverages section:**
+
+- Coverage start_date derivation subsection per 23.5
+- COALESCE application invariant subsection per 23.5a
+- Coverage creation timing paragraph per 23.6
+
+**No section-level updates required for Claim Intake Data Model**
+(that section is Tier 3 deferred; when it's drafted, Decision 23.8,
+23.9, 23.10, 23.11 guard 2 inform it).
+
+### Cat 3 backlog impact
+
+- Item #7 (contractual_date_manual creation-timing) resolved by this
+  Decision
+- Item #6 (Registration status enum richer values) resolved by this
+  Decision as a byproduct of 23.7
+- Remaining Cat 3 backlog: FOUR items (was six pre-Decision-23)
+  - #1 Claim eligibility rules + emergency carve-outs
+  - #5 ALA reminder notifications via clock_events
+  - #8 end_date derivation mechanism
+  - #9 Customer-O&M Authorization document architecture
+
+Section cascade updates land in subsequent commits this session.
+
+---
 ## Future decisions
 
 Decisions 17+ will be appended above this section as triage-and-resolve
