@@ -1168,7 +1168,7 @@ six pre-procedure verification gates per Decision 22.3, the drift verification
 gate per Decision 22.9, the six named failure modes per Decision 22.5, the
 Mode C gating per Decision 22.10, and the four Phase 4 transition criteria per
 Decision 22.8 are architecturally locked. Procedure execution against the
-hosted database is Phase 4 work, gated by the CLAUDE.md stop-point until all
+hosted database is Phase 4 work, gated by the CLAUDE-rev1.md stop-point until all
 four transition criteria in Decision 22.8 are satisfied. This section is the
 authoritative reference for the procedure and for ongoing migration tooling
 mechanics across the platform lifecycle.)
@@ -1185,7 +1185,7 @@ schema mechanics; Data Migration Tooling covers customer data mechanics.
 Both are load-bearing for the platform, and they are architecturally
 independent.
 
-Decision 22 (session-handoffs/5e-bridge-phase3-decisions-log.md) is the
+Decision 22 (session-handoffs/5e-bridge-phase3-decisions-log-rev1.md) is the
 architectural authority for the material in this section. This section
 documents Decision 22's ten commitments in reference-usable form and adds
 the ongoing operational mechanics that Decision 22 flagged as belonging in
@@ -1222,7 +1222,7 @@ the CLI will attempt to apply migrations 000 through the newest one,
 detecting that migration 000 has not been applied per migration_history,
 and attempting to CREATE TABLE tenants (which already exists) — producing
 either an error or, worse, silent corruption depending on the specific
-migration content. The CLAUDE.md stop-point (lines 71-83 as of this
+migration content. The CLAUDE-rev1.md stop-point (lines 71-83 as of this
 writing) documents this hazard and instructs Claude Code to STOP before
 running any command that could trigger this failure.
 
@@ -1235,7 +1235,7 @@ completes, subsequent supabase db push commands only attempt to apply
 migrations 005 and later.
 
 This is a one-time procedure. Once baseline is complete and Phase 4
-transition criteria per Decision 22.8 are all satisfied, the CLAUDE.md
+transition criteria per Decision 22.8 are all satisfied, the CLAUDE-rev1.md
 stop-point is updated to RESOLVED and Phase 4 work proceeds normally.
 The hazard becomes historical context preserved in this section.
 
@@ -1381,7 +1381,7 @@ authoritative source for behavioral changes across versions. If the
 locally installed CLI version differs from the pinned version, STOP —
 this is failure mode F (CLI version mismatch, see below).
 
-The pinned version is captured either in CLAUDE.md alongside the
+The pinned version is captured either in CLAUDE-rev1.md alongside the
 stop-point or in a repo-committed config file. Visual inspection of
 "looks like the current version" is not sufficient; the check is exact
 version-string match.
@@ -1389,7 +1389,7 @@ version-string match.
 **Gate 4 — Linked project verified against known-good project ID.**
 
 `supabase status --linked` shows the correct project ID. The correct ID
-is stored persistently — in CLAUDE.md or a committed config file — and
+is stored persistently — in CLAUDE-rev1.md or a committed config file — and
 the verification compares the returned ID against the stored ID exactly.
 
 Visual inspection of "this looks like our project" is NOT sufficient.
@@ -1401,9 +1401,9 @@ Gate 4 is much cheaper than recovery via Mode C.
 
 The stored project ID lives in a location that (a) is committed to the
 repo (so it's version-controlled and auditable), and (b) is protected
-by the same security posture as CLAUDE.md. A dedicated config file
+by the same security posture as CLAUDE-rev1.md. A dedicated config file
 under docs/operational/ is one appropriate location; embedding the ID
-in CLAUDE.md alongside the stop-point is another. The specific location
+in CLAUDE-rev1.md alongside the stop-point is another. The specific location
 is an operator preference; the architectural commitment is that the ID
 is stored persistently rather than remembered.
 
@@ -1780,9 +1780,9 @@ baseline was successfully completed. Future operators reviewing the
 project's history can find this entry and understand what happened,
 when, and by whom.
 
-**Condition 4 — CLAUDE.md stop-point updated to RESOLVED.**
+**Condition 4 — CLAUDE-rev1.md stop-point updated to RESOLVED.**
 
-The stop-point text in CLAUDE.md (currently lines 71-83 as of this
+The stop-point text in CLAUDE-rev1.md (currently lines 71-83 as of this
 writing) is updated to RESOLVED status with the execution date. This
 is the LAST step in the Phase 4 transition. It signals that Phase 4
 is unblocked.
@@ -1790,7 +1790,7 @@ is unblocked.
 Condition 4 is deliberately last. It is not parallel to verification;
 it is the readiness signal that follows successful verification.
 Sequence: complete baseline (Conditions 1-2) -> session-handoff entry
-(Condition 3) -> CLAUDE.md update (Condition 4) -> Phase 4 unblocked.
+(Condition 3) -> CLAUDE-rev1.md update (Condition 4) -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four are met, Phase 4 work proceeds normally and the stop-point
@@ -1906,16 +1906,16 @@ record.
 
 **The stop-point becomes historical context.**
 
-Post-Phase-4-transition, the CLAUDE.md stop-point at lines 71-83
+Post-Phase-4-transition, the CLAUDE-rev1.md stop-point at lines 71-83
 (as of this writing; the specific lines will change with future
-CLAUDE.md edits) is updated to RESOLVED status. The text is preserved
-in CLAUDE.md as historical context rather than being deleted. Future
-operators reading CLAUDE.md can find both the historical hazard and
+CLAUDE-rev1.md edits) is updated to RESOLVED status. The text is preserved
+in CLAUDE-rev1.md as historical context rather than being deleted. Future
+operators reading CLAUDE-rev1.md can find both the historical hazard and
 the resolution reference.
 
-### CLAUDE.md stop-point evolution
+### CLAUDE-rev1.md stop-point evolution
 
-Per Decision 22.7, the CLAUDE.md stop-point evolves through three
+Per Decision 22.7, the CLAUDE-rev1.md stop-point evolves through three
 distinct states across the platform lifecycle:
 
 **State 1 — In force (current state as of this section).**
@@ -1951,7 +1951,7 @@ date. Suggested resolved-state text:
     Migration Tooling section for the historical hazard context
     and the procedure that resolved it.
 
-The RESOLVED state is preserved in CLAUDE.md indefinitely. It serves
+The RESOLVED state is preserved in CLAUDE-rev1.md indefinitely. It serves
 audit defensibility — future contributors can find both the historical
 hazard and its resolution without needing to reconstruct either from
 git history.
@@ -1997,7 +1997,7 @@ prompt is the safer default and is the architectural commitment.
 
 ### Cross-references
 
-- Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log.md)
+- Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log-rev1.md)
   is the architectural authority for this section. Decision 22's ten
   commitments (22.1 through 22.10) are documented here in
   reference-usable form.
@@ -2007,7 +2007,7 @@ prompt is the safer default and is the architectural commitment.
   convention that Database Migration Tooling operates within. Step 5
   of the baseline procedure and the ongoing schema.sql regeneration
   mechanic both depend on Decision 10's mechanism.
-- CLAUDE.md (lines 71-83 as of this writing) contains the stop-point
+- CLAUDE-rev1.md (lines 71-83 as of this writing) contains the stop-point
   that governs Claude Code's behavior during the pre-baseline period.
   The stop-point cross-references this section and Decision 22.
 - Data Migration Tooling section (in v2, elsewhere) covers the
