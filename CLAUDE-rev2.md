@@ -1,4 +1,4 @@
-**Last updated:** 102d122 2026-06-17
+**Last updated:** 8d94604 2026-07-09
 
 # Claude Code rules for the WarrantyOS repo
 
