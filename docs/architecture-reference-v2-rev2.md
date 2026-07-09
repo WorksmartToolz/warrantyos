@@ -1168,7 +1168,7 @@ six pre-procedure verification gates per Decision 22.3, the drift verification
 gate per Decision 22.9, the six named failure modes per Decision 22.5, the
 Mode C gating per Decision 22.10, and the four Phase 4 transition criteria per
 Decision 22.8 are architecturally locked. Procedure execution against the
-hosted database is Phase 4 work, gated by the CLAUDE-rev1.md stop-point until all
+hosted database is Phase 4 work, gated by the CLAUDE-rev2.md stop-point until all
 four transition criteria in Decision 22.8 are satisfied. This section is the
 authoritative reference for the procedure and for ongoing migration tooling
 mechanics across the platform lifecycle.)
@@ -1185,7 +1185,7 @@ schema mechanics; Data Migration Tooling covers customer data mechanics.
 Both are load-bearing for the platform, and they are architecturally
 independent.
 
-Decision 22 (session-handoffs/5e-bridge-phase3-decisions-log-rev1.md) is the
+Decision 22 (session-handoffs/5e-bridge-phase3-decisions-log-rev2.md) is the
 architectural authority for the material in this section. This section
 documents Decision 22's ten commitments in reference-usable form and adds
 the ongoing operational mechanics that Decision 22 flagged as belonging in
@@ -1222,7 +1222,7 @@ the CLI will attempt to apply migrations 000 through the newest one,
 detecting that migration 000 has not been applied per migration_history,
 and attempting to CREATE TABLE tenants (which already exists) — producing
 either an error or, worse, silent corruption depending on the specific
-migration content. The CLAUDE-rev1.md stop-point (lines 71-83 as of this
+migration content. The CLAUDE-rev2.md stop-point (lines 71-83 as of this
 writing) documents this hazard and instructs Claude Code to STOP before
 running any command that could trigger this failure.
 
@@ -1235,7 +1235,7 @@ completes, subsequent supabase db push commands only attempt to apply
 migrations 005 and later.
 
 This is a one-time procedure. Once baseline is complete and Phase 4
-transition criteria per Decision 22.8 are all satisfied, the CLAUDE-rev1.md
+transition criteria per Decision 22.8 are all satisfied, the CLAUDE-rev2.md
 stop-point is updated to RESOLVED and Phase 4 work proceeds normally.
 The hazard becomes historical context preserved in this section.
 
@@ -1381,7 +1381,7 @@ authoritative source for behavioral changes across versions. If the
 locally installed CLI version differs from the pinned version, STOP —
 this is failure mode F (CLI version mismatch, see below).
 
-The pinned version is captured either in CLAUDE-rev1.md alongside the
+The pinned version is captured either in CLAUDE-rev2.md alongside the
 stop-point or in a repo-committed config file. Visual inspection of
 "looks like the current version" is not sufficient; the check is exact
 version-string match.
@@ -1389,7 +1389,7 @@ version-string match.
 **Gate 4 — Linked project verified against known-good project ID.**
 
 `supabase status --linked` shows the correct project ID. The correct ID
-is stored persistently — in CLAUDE-rev1.md or a committed config file — and
+is stored persistently — in CLAUDE-rev2.md or a committed config file — and
 the verification compares the returned ID against the stored ID exactly.
 
 Visual inspection of "this looks like our project" is NOT sufficient.
@@ -1401,9 +1401,9 @@ Gate 4 is much cheaper than recovery via Mode C.
 
 The stored project ID lives in a location that (a) is committed to the
 repo (so it's version-controlled and auditable), and (b) is protected
-by the same security posture as CLAUDE-rev1.md. A dedicated config file
+by the same security posture as CLAUDE-rev2.md. A dedicated config file
 under docs/operational/ is one appropriate location; embedding the ID
-in CLAUDE-rev1.md alongside the stop-point is another. The specific location
+in CLAUDE-rev2.md alongside the stop-point is another. The specific location
 is an operator preference; the architectural commitment is that the ID
 is stored persistently rather than remembered.
 
@@ -1780,9 +1780,9 @@ baseline was successfully completed. Future operators reviewing the
 project's history can find this entry and understand what happened,
 when, and by whom.
 
-**Condition 4 — CLAUDE-rev1.md stop-point updated to RESOLVED.**
+**Condition 4 — CLAUDE-rev2.md stop-point updated to RESOLVED.**
 
-The stop-point text in CLAUDE-rev1.md (currently lines 71-83 as of this
+The stop-point text in CLAUDE-rev2.md (currently lines 71-83 as of this
 writing) is updated to RESOLVED status with the execution date. This
 is the LAST step in the Phase 4 transition. It signals that Phase 4
 is unblocked.
@@ -1790,7 +1790,7 @@ is unblocked.
 Condition 4 is deliberately last. It is not parallel to verification;
 it is the readiness signal that follows successful verification.
 Sequence: complete baseline (Conditions 1-2) -> session-handoff entry
-(Condition 3) -> CLAUDE-rev1.md update (Condition 4) -> Phase 4 unblocked.
+(Condition 3) -> CLAUDE-rev2.md update (Condition 4) -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four are met, Phase 4 work proceeds normally and the stop-point
@@ -1906,16 +1906,16 @@ record.
 
 **The stop-point becomes historical context.**
 
-Post-Phase-4-transition, the CLAUDE-rev1.md stop-point at lines 71-83
+Post-Phase-4-transition, the CLAUDE-rev2.md stop-point at lines 71-83
 (as of this writing; the specific lines will change with future
-CLAUDE-rev1.md edits) is updated to RESOLVED status. The text is preserved
-in CLAUDE-rev1.md as historical context rather than being deleted. Future
-operators reading CLAUDE-rev1.md can find both the historical hazard and
+CLAUDE-rev2.md edits) is updated to RESOLVED status. The text is preserved
+in CLAUDE-rev2.md as historical context rather than being deleted. Future
+operators reading CLAUDE-rev2.md can find both the historical hazard and
 the resolution reference.
 
-### CLAUDE-rev1.md stop-point evolution
+### CLAUDE-rev2.md stop-point evolution
 
-Per Decision 22.7, the CLAUDE-rev1.md stop-point evolves through three
+Per Decision 22.7, the CLAUDE-rev2.md stop-point evolves through three
 distinct states across the platform lifecycle:
 
 **State 1 — In force (current state as of this section).**
@@ -1951,7 +1951,7 @@ date. Suggested resolved-state text:
     Migration Tooling section for the historical hazard context
     and the procedure that resolved it.
 
-The RESOLVED state is preserved in CLAUDE-rev1.md indefinitely. It serves
+The RESOLVED state is preserved in CLAUDE-rev2.md indefinitely. It serves
 audit defensibility — future contributors can find both the historical
 hazard and its resolution without needing to reconstruct either from
 git history.
@@ -1997,7 +1997,7 @@ prompt is the safer default and is the architectural commitment.
 
 ### Cross-references
 
-- Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log-rev1.md)
+- Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log-rev2.md)
   is the architectural authority for this section. Decision 22's ten
   commitments (22.1 through 22.10) are documented here in
   reference-usable form.
@@ -2007,7 +2007,7 @@ prompt is the safer default and is the architectural commitment.
   convention that Database Migration Tooling operates within. Step 5
   of the baseline procedure and the ongoing schema.sql regeneration
   mechanic both depend on Decision 10's mechanism.
-- CLAUDE-rev1.md (lines 71-83 as of this writing) contains the stop-point
+- CLAUDE-rev2.md (lines 71-83 as of this writing) contains the stop-point
   that governs Claude Code's behavior during the pre-baseline period.
   The stop-point cross-references this section and Decision 22.
 - Data Migration Tooling section (in v2, elsewhere) covers the
@@ -2053,8 +2053,23 @@ lifecycle below).
                                     -- 'pending' | 'confirmed' | 'overdue'
                                     -- CHECK constraint enforces allowed values
       trigger_date                  date nullable
-                                    -- set when trigger_status becomes
-                                    -- 'confirmed'; null until then
+                                    -- Semantics vary by trigger_source:
+                                    -- For 'contractual_date_manual':
+                                    --   populated at project creation
+                                    --   with the contractually-agreed
+                                    --   warranty active date. Non-null
+                                    --   at creation via Server Action
+                                    --   enforcement (exception via
+                                    --   migration path per Decision
+                                    --   23.11).
+                                    -- For 'wbs_integration',
+                                    --   'delivery_report_tokenized',
+                                    --   'delivery_report_api':
+                                    --   populated when trigger_status
+                                    --   becomes 'confirmed' (trigger
+                                    --   event actually happens). Null
+                                    --   until then.
+                                    -- Per Decision 23.1.
       integration_config            jsonb nullable
                                     -- WBS / API integration identity and
                                     -- project reference; null for non-
@@ -2160,6 +2175,19 @@ The transitions are governed by trigger_source. The mechanism by which a
 state change becomes either a future-firing clock event or a synchronous
 Server Action effect is in the lifecycle section below.
 
+For `contractual_date_manual` specifically, Decision 23.1 clarifies the
+semantics of `pending`. At project creation, `trigger_date` is already
+populated with the contractually-agreed warranty active date — the tenant
+user enters it directly. But `trigger_status` remains `pending` because the
+warranty hasn't started yet: the calendar hasn't reached the recorded date.
+The warranty starts operationally per the contract on the recorded date,
+independent of platform state changes to `trigger_status` (this reflects
+Decision 23.8's warranty-starts-per-contract principle: platform state
+does not block customer rights that the contract grants). The transition
+of `trigger_status` for `contractual_date_manual` is governed by other
+events (deferred to a future architectural decision per Decision 23's open
+questions), NOT by the calendar reaching `trigger_date`.
+
 ### Lifecycle: when projects are created and what fires
 
 This revises Phase 0 item 9, which was originally written EPC-only ("Projects
@@ -2169,12 +2197,17 @@ milestone, default 21 days, per-tenant configurable.") The revised wording:
 
 Projects exist in WarrantyOS at the point determined by their trigger source.
 
-- For contractual_date_manual and wbs_integration (EPC shape), the project
-  is created when the trigger date is known in advance. trigger_status starts
-  pending. Registration prep is triggered registration_lead_time_days before
-  the trigger date — a future-firing clock event of type
-  registration_prep_pre_trigger inserted into clock_events at project creation.
-  Default lead time is 21 days, per-tenant configurable.
+- For `contractual_date_manual` and `wbs_integration` when the trigger date
+  is known in advance (EPC shape), the project is created when the trigger
+  date is known. `trigger_status` starts `pending`. `trigger_date` is
+  populated at project creation for `contractual_date_manual` (per Decision
+  23.1); for `wbs_integration` in the known-in-advance case, `trigger_date`
+  is populated at project creation if the integration poller has captured
+  the milestone date. Registration prep is triggered
+  `registration_lead_time_days` before the trigger date — a future-firing
+  clock event of type `registration_prep_pre_trigger` inserted into
+  `clock_events` at project creation (per Decision 23.2). Default lead time
+  is 21 days, per-tenant configurable.
 - For delivery_report_tokenized and delivery_report_api (supply-only shape),
   the project is created when the sale occurs. trigger_status starts pending.
   Registration prep does NOT fire on creation — there is no known trigger date
@@ -2269,6 +2302,66 @@ migration batch that created the project, if any. Projects created through
 normal tenant operation leave this null. Decision 8 covers the import
 mechanics.
 
+### Migration and import handling
+
+Per Decision 23.11, projects imported via Decision 8's data migration
+tooling may enter the system with `trigger_source =
+'contractual_date_manual'` and `trigger_date = NULL` because the
+customer's source data was incomplete at migration time. The architecture
+handles this case with a permissive-with-surfacing model rather than
+blocking the import.
+
+**Migration handling:**
+
+- The project row is created despite missing trigger_date
+- The `registration_prep_pre_trigger` clock event is NOT created at
+  migration time (no known trigger_date to schedule against)
+- The row surfaces in a "projects missing trigger_date" operational
+  queue for warrantor follow-up
+- When the warrantor later enters `trigger_date` via post-migration
+  editing, the Server Action creates the clock event at that point,
+  scheduled to fire at `trigger_date - registration_lead_time_days`
+
+Application-layer enforcement: a project row created through the
+standard Server Action (not migration) MUST have `trigger_date` non-null
+when `trigger_source = 'contractual_date_manual'`. Migration is the
+exception path — Server Action bypass allows migration to insert rows
+with missing trigger_date. The database CHECK constraint on projects
+does NOT enforce trigger_date non-null for `contractual_date_manual`,
+precisely because migration needs to create these rows.
+
+**Three downstream guards (per Decision 23.11):**
+
+**Guard 1 — Deferred clock event creation.** The Server Action that
+populates trigger_date on a migrated project must handle the
+"trigger_date was null, now being populated" case by creating the
+`registration_prep_pre_trigger` clock event at that point, not at
+original project creation. This is the retrospective scheduling path.
+
+**Guard 2 — Cat 3 #1 handoff for in-flight state.** Between migration
+completion and trigger_date population (whether by warrantor entry or
+by never happening), the project exists but has no registration and no
+clock event. Claims may be filed during this in-flight state. Claim
+eligibility handling for "project exists, trigger_date populated
+(past), but registration not yet created" is a Cat 3 #1 concern.
+Decision 23 introduces the state; Cat 3 #1 will specify the eligibility
+rules.
+
+**Guard 3 — Past-dated trigger_date handling.** If a warrantor populates
+trigger_date with a past date (e.g., migrating projects whose
+contractual dates already occurred), the calculation
+`trigger_date - lead_time_days` produces a past `fires_at`. Decision 9's
+clock_events dispatcher fires already-past events on the next poll —
+the clock event is created, and the dispatcher fires it on the next
+hourly poll. Between the trigger_date population and the next
+dispatcher poll, the project exists without a registration; this is an
+in-flight state that Guard 2 covers via the Cat 3 #1 handoff.
+
+These three guards are architectural commitments of Decision 23, not
+downstream operational scope. Server Action implementations for
+project creation, project editing (trigger_date update), and the
+`registration_prep_pre_trigger` dispatcher must honor these guards.
+
 ### Multiple projects per tenant; the portfolio view
 
 A tenant has many projects, all scoped through Standard RLS. The "Project
@@ -2325,10 +2418,14 @@ work plans, costs — depends on a live registration.
                                   -- issued at Section 7 activation;
                                   -- null until then; immutable once set
       status                      text NOT NULL
-                                  -- minimum values: 'pre_activation',
-                                  -- 'active'. Richer values are a
-                                  -- downstream operational question.
-                                  -- CHECK constraint enforces allowed values
+                                  -- Four-value closed set per Decision
+                                  --   23.7: 'pre_activation',
+                                  --   'assigned', 'active', 'rejected'.
+                                  -- See "Registration status state
+                                  --   machine" subsection for state
+                                  --   semantics and transitions.
+                                  -- CHECK constraint enforces allowed
+                                  --   values.
       assigned_to_contact_id      uuid nullable FK -> contacts(id)
       assigned_to_user_id         uuid nullable FK -> public.users(id)
                                   -- CHECK: exactly one non-null when
@@ -2339,6 +2436,15 @@ work plans, costs — depends on a live registration.
       assigned_at                 timestamptz nullable
       activated_at                timestamptz nullable
                                   -- set when status transitions to active
+      actual_start_date           date nullable
+                                  -- populated by the warrantor when
+                                  --   they confirm the warranty actually
+                                  --   started operationally; null until
+                                  --   confirmed; no default value.
+                                  -- May be before, at, or after
+                                  --   trigger_date (per Decision 23.4a
+                                  --   no temporal constraint).
+                                  -- Per Decision 23.4.
       created_at                  timestamptz NOT NULL DEFAULT now()
       updated_at                  timestamptz NOT NULL DEFAULT now()
       -- CHECK / app-layer invariant: tenant_id matches the referenced
@@ -2374,15 +2480,17 @@ artifacts it requires, what conditions it checks, who has authority to
 clear it. v2 documents Section 7 as the named activation event with the
 state consequences we know:
 
-- Before Section 7 passes: warranty_id is null. status is pre-activation.
-  Coverages may exist as draft, but no claim can be filed and no warranty
-  term is counting.
+- Before Section 7 passes: warranty_id is null. status is `assigned`
+  (the normal state during prep work per Decision 23.7's four-state
+  machine; `pre_activation` is a fallback edge-case state, not the
+  general pre-gate state). Coverages may exist as draft, but no claim
+  can be filed and no warranty term is counting.
 - Section 7 passes: the Server Action handling activation generates the
   WarrantyID from the tenant's warranty_id row in tenant_id_sequences
   (default format WID-{year}-{seq:06d}, per-tenant configurable). The
   WarrantyID is written to warranty_id and the column is treated as
-  immutable from that point. status transitions to active. activated_at
-  is captured.
+  immutable from that point. status transitions from `assigned` to
+  `active` per Decision 23.7. activated_at is captured.
 - After Section 7 passes: the registration is live. Coverages are active,
   claims can be filed against the registration, customer-facing
   communications reference the WarrantyID.
@@ -2417,6 +2525,15 @@ Snapshot Pattern's dual-FK shape: two nullable FKs with a CHECK enforcing
 exactly one non-null when assigned, plus snapshot columns for name, email,
 phone, and the assigned_at timestamp.
 
+Initial assignment happens as part of the atomic Server Action at
+`registration_prep_pre_trigger` clock event firing (per Decision 23.3;
+see the Clock-event interactions subsection below). The dispatcher
+creates the registration row, captures the assignee, sets
+`status = 'assigned'`, and sends notification atomically. The mechanism
+by which the Server Action determines the specific assignee — pre-
+configured default per tenant, assignment task surfaced to team admins,
+operator selection — is Phase 4 / operational drafting.
+
 The FK type drives downstream behavior. A contact assignee is reached
 through the Stateless Tokenized Interaction Pattern (a tokenized email link
 to a focused activation form). A tenant-user assignee is reached through an
@@ -2424,40 +2541,115 @@ in-app notification on their existing login. The two paths are different
 because the parties are different kinds of thing — contacts have no
 account, tenant users do.
 
-Reassignment can cross types. A registration assigned to a contact PM can
-be reassigned to a Reviewer for self-handling, or the reverse. The snapshot
-columns capture the assignment at the moment it was made and are never
-updated on read; reassignment writes a new snapshot. See the FK + Snapshot
-Pattern section for the mechanics.
+Reassignment mechanics — the specifics of replacing an existing assignee,
+audit trail requirements, cross-type reassignment (contact to tenant user
+or reverse), notification behavior on reassignment, and permissible states
+for reassignment (whether reassignment is allowed in `active` state or
+only in `assigned` / `rejected` / `pre_activation` states) — are deferred
+to a downstream Decision per Decision 23.12. The atomic assignment model
+in Decision 23.3 handles initial assignment; reassignment is a real
+operational concern that requires its own architectural work.
 
-### Status
+### Registration status state machine
 
-A registration carries a status column. Two states are determined by the
-architecture:
+Per Decision 23.7, the registration status column carries a four-state
+machine that governs the registration's progress across its lifecycle.
+This resolves Cat 3 backlog item #6 as a byproduct of Decision 23's
+registration lifecycle work, and supersedes the earlier v1-anchor
+placeholder that deferred the closed set of values to a separate
+decision.
 
-- pre-activation — warranty_id is null. activated_at is null. The
-  registration exists but has no business-visible identifier and counts no
-  warranty time. Section 7 has not passed.
-- active — Section 7 has passed. warranty_id is set (immutable from this
-  point), activated_at is set, coverages count time.
+The four states are flat sequential — no hierarchy, no sub-states,
+no parallel state dimensions. Each state has explicit entry and exit
+transitions.
 
-Whether the pre-activation state needs to subdivide further (e.g., separate
-pending vs in-review states), and whether richer activation-progress states
-are useful at the architecture layer versus derived from operational fields,
-is a Phase 3 / downstream operational question — same flag as Section 7's
-specific conditions. The architecture establishes that a status column
-exists and carries at minimum the two states above; the closed set of values
-is settled by a separate decision.
+**States:**
 
-A third state — expired — is mentioned operationally (all coverages past
-their end_date), but whether expiry is a status value, a derived condition
-from coverage end_dates, or both, is also part of that downstream
-question.
+- `pre_activation` — the registration row exists but no assignee has
+  been captured. This state is reserved for edge cases where the
+  clock event dispatcher's atomic operation partially failed
+  (assignment failure, notification service down, contact FK invalid
+  at dispatch time, etc.). The row exists in the database, but the
+  atomic operation did not fully complete. Not entered during normal
+  operation.
 
-The column exists rather than being purely derived because queue filters,
-dashboards, and reporting are cleaner against a status column than against
-a multi-field derivation. Adding the column without locking its values is
-the architecturally restrained move.
+- `assigned` — an assignee has been captured on the registration.
+  Assignee is working on prep (configuring coverages, gathering
+  Section 7 documentation, etc.). This is the state most registrations
+  spend their prep window in.
+
+- `active` — Section 7 activation has passed, WarrantyID has been
+  issued, `activated_at` is populated. Registration is live.
+  Downstream claims, coverages billing time toward expiry, and
+  customer-facing communications reference the WarrantyID.
+
+- `rejected` — Section 7 activation attempt was rejected by the
+  reviewer. The registration is not active; the assignee must revise
+  and resubmit. This is a transient state (see transitions below).
+
+**Transitions:**
+
+- doesn't-exist -> `assigned` (normal path, per Decision 23.3's atomic
+  Server Action; the row is created and assigned in the same operation)
+- doesn't-exist -> `pre_activation` (edge case, when assignment fails
+  during the clock event dispatcher; see the Pre-activation
+  operational queue subsection below)
+- `pre_activation` -> `assigned` (when assignment completes after
+  edge-case entry, via manual intervention or retry mechanism)
+- `assigned` -> `active` (when Section 7 activation gate passes)
+- `assigned` -> `rejected` (when Section 7 activation attempt is
+  rejected)
+- `rejected` -> `assigned` (when the assignee revises and resubmits;
+  Section 7 rejection loops back to prep state for revision)
+
+No transition from `active` to any earlier state. Retirement or
+cancellation of an active registration is a separate concern not
+covered here.
+
+No transition from `rejected` to `active` directly; rejection always
+routes back through `assigned` for revision before another activation
+attempt.
+
+The CHECK constraint on `warranty_registrations.status` enforces the
+four allowed values: `pre_activation`, `assigned`, `active`,
+`rejected`.
+
+### Pre-activation operational queue
+
+Per Decision 23.7a, because `pre_activation` is an edge-case fallback
+state where the atomic Server Action at clock event firing partially
+failed, rows in this state require active operational attention. A
+registration sitting in `pre_activation` means the clock event fired,
+the row was created, but assignment did not complete. Something needs
+to happen to advance the row to `assigned`.
+
+Without an operational surface, `pre_activation` rows would silently
+accumulate as an unnoticed operational failure mode. This is the
+architectural concern Decision 23.7a addresses.
+
+The platform surfaces an operational queue for warrantor team admins
+showing registrations in `pre_activation` state. The queue is a
+straightforward derived filter over `warranty_registrations`
+(`WHERE status = 'pre_activation'`), scoped by tenant per the
+Standard RLS Pattern. Team admins review the queue and take action to
+resolve the failed assignment.
+
+Resolution paths from `pre_activation`:
+
+- **Manual assignment through an operational UI.** The team admin
+  selects an assignee (contact or tenant user) and completes the
+  assignment step that the atomic Server Action failed to complete.
+  The registration transitions to `assigned` per the state machine.
+
+- **Diagnose and retry the failed dispatcher path.** If the failure
+  was transient (notification service down, transient FK constraint
+  timing), the team admin can trigger a retry of the assignment step.
+
+The queue's specific UI/UX and the mechanism for resolving
+`pre_activation` rows (manual assignment vs retry, retry mechanics,
+audit trail for resolution actions) are Phase 4 / operational
+drafting. Decision 23.7a locks the operational queue as an
+architectural commitment; the operational specifics are downstream.
 
 ### Coverages are children of registration
 
@@ -2481,34 +2673,86 @@ drafting or a future decision. Phase 4 territory.
 ### Clock-event interactions
 
 A registration's lifecycle touches Clock Event Infrastructure differently
-depending on the project's trigger_source. What Item 17 specifies, what is
-synchronous, and what is open:
+depending on the project's trigger_source. Decision 23 locks the specific
+mechanics for each source category.
 
-- For contractual_date_manual (EPC, known date), the project's creation
-  inserts a registration_prep_pre_trigger event into clock_events, scheduled
-  registration_lead_time_days before the trigger date. When the event fires,
-  registration prep work begins — what specifically happens at firing time,
-  including whether the registration record is created at project creation
-  or at prep-event firing, is not specified by any locked source. v2 names
-  the prep event without resolving the creation-timing question; it's a
-  Phase 4 / downstream operational drafting decision.
-- For wbs_integration (EPC, polled), Item 17 specifies that when the poller
-  detects the milestone in its configured state, it sets trigger_status to
-  confirmed and synchronously invokes the Server Action that creates the
-  warranty registration. No clock_events row is created for the creation
-  itself; the transition is synchronous from the poller's perspective.
-- For delivery_report_tokenized and delivery_report_api (supply-only), Item
-  17 specifies that registration creation is synchronous on trigger_status's
-  transition from pending to confirmed. The Server Action handling the
-  buyer's report (or carrier API confirmation) creates the registration
-  directly. No clock_events row.
+**Contractual_date_manual and wbs_integration when trigger_date is known
+at creation (per Decision 23.2):**
 
-Warranty expiry warnings are a separate clock-event interaction. A
-warranty_expiry_warning event fires before each coverage's end_date,
-surfacing the upcoming expiry. The mechanism for transitioning to the
-expired state (whether it's a column update, a derivation, or both) is part
-of the same downstream operational question flagged in the Status section
-above.
+At project creation, the platform calculates
+`trigger_date - registration_lead_time_days` (per-tenant configurable
+setting, default 21) and inserts a `clock_events` row of type
+`registration_prep_pre_trigger` with that value as `fires_at`. The
+entity_type = 'project', entity_id = the project's id.
+
+The clock event is a scheduled reminder — Decision 9's Clock Event
+Infrastructure holds the row until the hourly pg_cron poll detects
+`fires_at` is in the past AND `status = 'pending'`. On that poll, the
+dispatcher runs.
+
+When the dispatcher runs the `registration_prep_pre_trigger` event, its
+Server Action performs an atomic write (per Decision 23.3):
+
+1. Creates the `warranty_registrations` row associated with the project
+   (project_id populated, tenant_id denormalized per Standard RLS Pattern)
+2. Assigns the registration to an assignee. Assignment populates one of
+   `assigned_to_contact_id` or `assigned_to_user_id` per the dual-FK model.
+   Captures assignee snapshots per the FK + Snapshot Pattern
+3. Sets `warranty_registrations.status = 'assigned'`
+4. Sends notification to the assignee
+
+"Atomic" here means the Server Action commits row+state in a single
+database write, NOT transactional all-or-nothing across all four effects.
+The distinction matters: if the row creation succeeds but assignment
+fails (contact FK invalid, assignee soft-deleted between dispatcher
+scheduling and firing, notification service down), the row exists with
+`status = 'pre_activation'` per the state machine's edge-case
+disposition. The atomic commit succeeds to whichever state is achievable
+given the partial-failure conditions.
+
+The normal path (all four effects succeed) produces a row directly in
+`assigned` state. The `pre_activation` state exists as a fallback for
+the partial-failure edge case; see the Pre-activation operational queue
+subsection above.
+
+Between project creation and the clock event firing, the registration
+row does NOT exist. The project exists (with trigger_date recorded), but
+no registration exists yet.
+
+**Delivery_report_tokenized and delivery_report_api (supply-only shape):**
+
+The mechanism is different and preserved from Phase 0 Item 17. The
+warranty_registrations row is created synchronously when the trigger
+event occurs (buyer report, carrier API confirmation) via a Server
+Action, not via a clock event. No `clock_events` row is created for the
+registration creation itself; the Server Action handles it directly on
+`trigger_status`'s transition from `pending` to `confirmed`.
+
+Decision 23's clock-event-driven creation mechanism (above) applies only
+to trigger sources where trigger_date is known at project creation. For
+supply-only sources, trigger_date isn't known until the sale/delivery is
+reported.
+
+**Wbs_integration when trigger_date is NOT known at creation:**
+
+If the WBS integration poller has not yet captured the milestone date at
+project creation, the mechanism follows the supply-only pattern above:
+the Server Action creates the registration synchronously when the poller
+detects the milestone and transitions `trigger_status` to `confirmed`.
+
+**Warranty expiry warnings:**
+
+Warranty expiry warnings are a separate clock-event interaction,
+operating at the coverage level (not the registration level). A
+`warranty_expiry_warning` event fires before each coverage's derived
+`end_date`, surfacing the upcoming expiry to warrantors and customers.
+See the Warranty Type Coverages section for the mechanism.
+
+Registration status remains `active` regardless of coverage expiry;
+expiration is a coverage-level concern, not a registration status
+transition. This is consistent with Decision 23.7's closed four-value
+state machine (`pre_activation`, `assigned`, `active`, `rejected`)
+which does not include an `expired` state.
 
 ### What is NOT on the registration
 
@@ -2521,10 +2765,12 @@ A short list of deliberate omissions, parallel to the Project section:
   shape); the registration inherits its customer through project_id.
   Duplicating the customer on registration would create a sync surface
   where there's no need for one.
-- No business-status enum beyond the minimum two states above. Anything
-  more granular about activation progress (which Section 7 fields are
-  complete, which reviewer approvals are in) is downstream operational
-  state, not registration-level state.
+- No business-status enum beyond the four states in the Registration
+  status state machine subsection above (`pre_activation`, `assigned`,
+  `active`, `rejected` per Decision 23.7). Anything more granular about
+  activation progress (which Section 7 fields are complete, which
+  reviewer approvals are in) is downstream operational state, not
+  registration-level state.
 
 ## Warranty Type Coverages
 
@@ -2645,6 +2891,13 @@ and term.
       warranty_registration_id    uuid NOT NULL FK -> warranty_registrations
       warranty_type_id            uuid NOT NULL FK -> warranty_types
       start_date                  date NOT NULL
+                                  -- immutable snapshot of the parent
+                                  --   project's trigger_date at coverage
+                                  --   creation. See "Coverage start_date
+                                  --   derivation" subsection for
+                                  --   snapshot semantics and COALESCE
+                                  --   derivation of effective start.
+                                  -- Per Decision 23.5.
       term_years                  integer NOT NULL
                                   -- a CHECK > 0 is the obvious defensive
                                   -- constraint; not architecturally locked
@@ -2664,6 +2917,85 @@ two coverages of the same warranty type. Whether this is enforced by a
 UNIQUE (warranty_registration_id, warranty_type_id) index is a Phase 3
 implementation detail; the architectural intent is one row per
 (registration, type) pair.
+
+### Coverage start_date derivation
+
+Per Decision 23.5, coverage `start_date` is populated at coverage
+creation with the current value of `projects.trigger_date`. This is a
+snapshot at coverage creation — the moment-in-time capture of what the
+contractually-agreed warranty active date is when the coverage row is
+inserted.
+
+Later, if `warranty_registrations.actual_start_date` is confirmed by
+the warrantor and differs from trigger_date, coverage rows are NOT
+updated. Coverage `start_date` remains as the trigger_date snapshot
+captured at coverage creation. Coverage rows are immutable snapshots.
+
+The effective start date for warranty calculations is derived at query
+time via COALESCE:
+
+    effective_start_date = COALESCE(
+        warranty_registrations.actual_start_date,
+        warranty_coverages.start_date
+    )
+
+Where `actual_start_date` is on the parent warranty_registrations row.
+When actual_start_date is null (not yet confirmed by the warrantor),
+the coverage's snapshotted start_date is used. When actual_start_date
+is confirmed, it overrides.
+
+This preserves audit-defensibility: coverage rows are historical
+records of what was known at creation time. Effective start is
+derived, not stored on the coverage row. Historical accuracy is
+preserved even when actual_start_date is confirmed after coverages
+were created and after claims were filed.
+
+**Application invariant (per Decision 23.5a):**
+
+Application code MUST use COALESCE(warranty_registrations.actual_start_date,
+warranty_coverages.start_date) for effective start date derivation in
+ALL of the following contexts:
+
+- Claim eligibility calculations
+- Coverage window calculations
+- Warranty period displays to warrantors and customers
+- end_date derivation (see the end_date subsection below; Cat 3 #8
+  downstream)
+- Expiry warning firing calculations
+
+The COALESCE derivation with trigger_date as fallback is the mechanism
+by which Decision 23.8's warranty-starts-per-contract principle is
+enforced at the coverage level. When `actual_start_date` is null
+(warrantor has not confirmed operational activation yet), the effective
+start date falls back to `trigger_date` — the contractually-agreed
+warranty active date. This ensures customer warranty rights are never
+blocked by internal platform state: coverage calculations proceed
+based on the contractual date even when operational confirmation is
+pending. Any future Decision that touches coverage window calculations
+or claim eligibility MUST reference Decision 23.8 explicitly to
+preserve this principle.
+
+Application code MUST NEVER read `warranty_coverages.start_date`
+directly for effective start date purposes. Reading the snapshot
+directly bypasses the derivation and produces incorrect effective
+start dates whenever actual_start_date has been populated. This is a
+silent data corruption failure mode.
+
+This invariant is architecturally comparable to Decision 19's atomic
+Accept-and-Signature invariant. It applies uniformly across all code
+paths that touch effective start date semantics.
+
+An alternative implementation approach that would eliminate the
+application invariant: implement effective_start_date as a PostgreSQL
+generated column on warranty_coverages (computed from a join to
+warranty_registrations) or as a view. This would enforce the
+derivation at the schema level; application code would read a single
+column. Adds implementation complexity but eliminates the cross-
+cutting invariant. Flagged as a Phase 4 implementation option;
+Decision 23 does not commit to either the invariant-enforced-in-app
+or the generated-column path. The commitment is the derivation
+semantic; the enforcement mechanism is a Phase 4 implementation
+choice.
 
 ### end_date is derived, not stored
 
@@ -2691,18 +3023,44 @@ not stored as an independent column) holds either way.
 
 ### Coverages and the registration's status
 
-A coverage's start_date and term_years are recorded at registration time,
-but the coverage does not "count time" until the registration is active.
-Pre-activation, the coverage row may exist as draft. Once Section 7
-passes and the registration becomes active, the coverages are live.
+Per Decision 23.6, coverages are created during the prep window by the
+assignee. Under Decision 23.3's registration lifecycle timing, the
+warranty_registrations row is created when the `registration_prep_pre_trigger`
+clock event fires (approximately 21 days before trigger_date for
+`contractual_date_manual` projects). Coverages come into existence during
+the prep window that follows.
+
+The assignee, during their prep work, configures coverages by drawing
+down warranty types from the tenant's warranty_types list, setting
+term_years for each, and populating coverage rows. Coverage creation
+is part of the prep work that must complete before Section 7 activation.
+
+At coverage creation, each coverage row's `start_date` is populated
+with the current `projects.trigger_date` value (per Decision 23.5's
+snapshot semantics documented in the Coverage start_date derivation
+subsection above). Each coverage row's `end_date` is derived from
+`start_date + term_years` (the mechanism is Cat 3 #8, still on the
+backlog).
+
+A coverage does not "count time" until the registration is active.
+While the registration is in `assigned` state, coverage rows exist but
+no warranty term is running. Once Section 7 passes and the registration
+transitions to `active`, coverages are live and count toward expiry.
 
 The expiry warning is a clock event, not a column update. A
-warranty_expiry_warning event in clock_events fires before each
-coverage's computed end_date, surfacing the upcoming expiry. The
-mechanism for the registration's transition to expired (whether driven
-by all-coverages-past-end-date as a derived state or as an explicit
-status update) is part of the Warranty Registration section's
-status-enum open question.
+`warranty_expiry_warning` event in `clock_events` fires before each
+coverage's derived end_date, surfacing the upcoming expiry to warrantors
+and customers.
+
+Coverage expiration is a coverage-level concern, not a registration
+status transition. When all coverages on a registration have passed
+their end_date, the registration status remains `active` — Decision
+23.7's four-value state machine (`pre_activation`, `assigned`, `active`,
+`rejected`) does not include an `expired` state for registrations.
+Expiration handling at the coverage level (whether it's a derived
+condition from end_date, or gets a coverage-level status column, or
+both) is deferred to future architectural work per Decision 23's open
+questions.
 
 ### What is NOT on the coverage
 
@@ -2712,10 +3070,13 @@ A parallel deliberate-omissions list:
 - No business-visible identifier. Coverages are referenced internally
   by uuid; the customer sees warranties (WarrantyID) and claims
   (ClaimID), not individual coverage rows.
-- No coverage-level status enum. A coverage's state is derived from
-  its registration's status and its own end_date — active when
-  registration is active and now < end_date, expired when now >
-  end_date.
+- No coverage-level status enum. A coverage's operational state is
+  derived from its registration's status and its own derived end_date
+  — the coverage is counting time when registration is `active` and
+  now < end_date, and past-expiry when now > end_date. Whether
+  coverage-level expiration warrants an explicit status column, remains
+  purely derived, or something else, is deferred to future architectural
+  work per Decision 23's open questions.
 
 ## Claim (Shell)
 

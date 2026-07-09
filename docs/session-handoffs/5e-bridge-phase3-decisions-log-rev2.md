@@ -2997,7 +2997,7 @@ in the repo. Phase 4 work that involves applying migrations to the
 hosted DB cannot begin until the remote migration history is
 baselined.
 
-CLAUDE-rev1.md currently documents this as a stop-point (lines 71-83):
+CLAUDE-rev2.md currently documents this as a stop-point (lines 71-83):
 do NOT run `supabase db push`, `supabase db remote commit`,
 `supabase migration up --linked`, or any command that applies local
 migrations to the hosted/remote/production database until the remote
@@ -3039,7 +3039,7 @@ Ten architectural commitments.
 **22.1: Phase 4 transition gate.**
 
 Phase 4 work involving migrations cannot begin until the baseline
-procedure is executed and verified. The CLAUDE-rev1.md stop-point
+procedure is executed and verified. The CLAUDE-rev2.md stop-point
 (currently lines 71-83) remains in force until Phase 4 transition
 criteria (22.8) are all satisfied. Until then, Claude Code must
 STOP and surface the hazard rather than running migration commands
@@ -3141,7 +3141,7 @@ documentation time. Version mismatch is failure mode F (see 22.5).
 
 **Gate 4 — Linked project verified against known-good project ID.**
 `supabase status --linked` shows the correct project ID, matched
-against the project ID stored persistently (in CLAUDE-rev1.md or a
+against the project ID stored persistently (in CLAUDE-rev2.md or a
 committed config file). A single-character typo in project ID is
 unrecoverable surgery on the wrong database. Visual inspection is
 NOT sufficient — the verification is "matches the stored ID exactly,"
@@ -3277,9 +3277,9 @@ understand both what to do and why this section exists. The section
 serves audit defensibility and protects against similar situations
 recurring.
 
-**22.7: CLAUDE-rev1.md stop-point evolution and password handling.**
+**22.7: CLAUDE-rev2.md stop-point evolution and password handling.**
 
-Current CLAUDE-rev1.md stop-point text (lines 71-83) remains in force
+Current CLAUDE-rev2.md stop-point text (lines 71-83) remains in force
 until Phase 4 transition criteria (22.8) are satisfied. After
 Decision 22 commits but before baseline is executed, the stop-point
 text is updated to cross-reference Decision 22's documented
@@ -3326,15 +3326,15 @@ Phase 4 work can begin once ALL four conditions are satisfied:
    anomalies encountered and resolved. This entry serves as the
    permanent record that baseline was successfully completed.
 
-4. **CLAUDE-rev1.md stop-point updated to RESOLVED.** The stop-point
+4. **CLAUDE-rev2.md stop-point updated to RESOLVED.** The stop-point
    text is updated to "RESOLVED" status with the execution date.
    This is the LAST step in the Phase 4 transition. It signals
    that Phase 4 is unblocked.
 
-The four conditions are ordered. Condition 4 (CLAUDE-rev1.md update) is
+The four conditions are ordered. Condition 4 (CLAUDE-rev2.md update) is
 the LAST step that signals readiness, not parallel to verification.
 Sequence: complete baseline -> verify (Steps 4 and 5) -> session
-handoff entry -> CLAUDE-rev1.md update -> Phase 4 unblocked.
+handoff entry -> CLAUDE-rev2.md update -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four, Phase 4 work proceeds normally and the stop-point becomes
@@ -3439,7 +3439,7 @@ transition gating.
 
 ### Cross-section dependencies
 
-- **CLAUDE-rev1.md (project-level operational rules):** Stop-point text
+- **CLAUDE-rev2.md (project-level operational rules):** Stop-point text
   updated per 22.7. Stop-point itself remains in force until Phase
   4 transition criteria are satisfied per 22.8.
 - **New section "Database Migration Tooling" in architecture-
@@ -3482,7 +3482,7 @@ transition gating.
 **New section in v2's architecture reference:** Database Migration
 Tooling. Section content per 22.6.
 
-**CLAUDE-rev1.md stop-point evolution per 22.7:** Cross-reference
+**CLAUDE-rev2.md stop-point evolution per 22.7:** Cross-reference
 updated to point to Decision 22 and the new Database Migration Tooling
 section. Stop-point itself remains in force.
 
@@ -4146,7 +4146,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Cross-section dependencies
 
-- **Project section** (in v2's architecture-reference-v2-rev1.md):
+- **Project section** (in v2's architecture-reference-v2-rev2.md):
   - trigger_date semantics revision for `contractual_date_manual`
     (23.1) with column comment update
   - Lifecycle subsection needs updates reflecting trigger_date-at-
@@ -4274,7 +4274,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Decision implications for already-committed sections
 
-**Project section (in v2's architecture-reference-v2-rev1.md):**
+**Project section (in v2's architecture-reference-v2-rev2.md):**
 
 - Lifecycle subsection updates per 23.1, 23.2, 23.11
 - New "Migration and import handling" subsection or paragraph per
