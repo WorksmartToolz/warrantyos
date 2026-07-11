@@ -153,6 +153,45 @@ Decision 5 (`warranty_registrations`), and applies to every future child table
 whose parent is also tenant-scoped. `custom_field_values` is the precedent
 specifically called out for high-read child tables.
 
+### View security convention (per Decision 24.5)
+
+Views on tenant-scoped tables MUST be created with the `security_invoker = true`
+attribute. This attribute is REQUIRED and non-optional for any view whose
+underlying tables are subject to RLS policies.
+
+The default behavior of Postgres views is SECURITY DEFINER semantics — the view
+executes with the privileges of the view owner rather than the querying user.
+When the view owner is a role with RLS bypass or when RLS policies are not
+evaluated during view execution, this default silently bypasses tenant
+isolation. A view without `security_invoker = true` on tenant-scoped tables
+creates a cross-tenant data leak vector regardless of how the underlying
+tables' RLS policies are defined.
+
+The `security_invoker = true` attribute (Postgres 15+) causes the view to
+execute with the querying user's privileges, respecting RLS policies on the
+underlying tables. Tenant isolation is preserved end-to-end from the view
+through to the base tables.
+
+Requirements:
+
+- Every migration creating a view on tenant-scoped tables MUST include
+  `WITH (security_invoker = true)` in the CREATE VIEW statement
+- Every migration altering an existing view MUST preserve the
+  `security_invoker = true` attribute
+- Views must have appropriate GRANTs for the application role that PostgREST
+  uses, following the same pattern as base table GRANTs (missing GRANTs on
+  a view produce the same failure mode as missing GRANTs on a table — the
+  Phase 1 missing-GRANTs incident is the precedent)
+
+The trigger case for this convention is Decision 24, which introduces the
+first view (`warranty_coverages_effective`) exposing derived
+effective_start_date and effective_end_date columns via a cross-table
+COALESCE. Decision 24's Resolution 24.5 documents the specific application
+of this convention to that view.
+
+Future Decisions introducing views on tenant-scoped tables MUST reference
+this convention and confirm compliance in their view definitions.
+
 ---
 
 ## Stateless Tokenized Interaction Pattern
@@ -1168,7 +1207,7 @@ six pre-procedure verification gates per Decision 22.3, the drift verification
 gate per Decision 22.9, the six named failure modes per Decision 22.5, the
 Mode C gating per Decision 22.10, and the four Phase 4 transition criteria per
 Decision 22.8 are architecturally locked. Procedure execution against the
-hosted database is Phase 4 work, gated by the CLAUDE-rev2.md stop-point until all
+hosted database is Phase 4 work, gated by the CLAUDE-rev3.md stop-point until all
 four transition criteria in Decision 22.8 are satisfied. This section is the
 authoritative reference for the procedure and for ongoing migration tooling
 mechanics across the platform lifecycle.)
@@ -1185,7 +1224,7 @@ schema mechanics; Data Migration Tooling covers customer data mechanics.
 Both are load-bearing for the platform, and they are architecturally
 independent.
 
-Decision 22 (session-handoffs/5e-bridge-phase3-decisions-log-rev2.md) is the
+Decision 22 (session-handoffs/5e-bridge-phase3-decisions-log-rev3.md) is the
 architectural authority for the material in this section. This section
 documents Decision 22's ten commitments in reference-usable form and adds
 the ongoing operational mechanics that Decision 22 flagged as belonging in
@@ -1222,7 +1261,7 @@ the CLI will attempt to apply migrations 000 through the newest one,
 detecting that migration 000 has not been applied per migration_history,
 and attempting to CREATE TABLE tenants (which already exists) — producing
 either an error or, worse, silent corruption depending on the specific
-migration content. The CLAUDE-rev2.md stop-point (lines 71-83 as of this
+migration content. The CLAUDE-rev3.md stop-point (lines 71-83 as of this
 writing) documents this hazard and instructs Claude Code to STOP before
 running any command that could trigger this failure.
 
@@ -1235,7 +1274,7 @@ completes, subsequent supabase db push commands only attempt to apply
 migrations 005 and later.
 
 This is a one-time procedure. Once baseline is complete and Phase 4
-transition criteria per Decision 22.8 are all satisfied, the CLAUDE-rev2.md
+transition criteria per Decision 22.8 are all satisfied, the CLAUDE-rev3.md
 stop-point is updated to RESOLVED and Phase 4 work proceeds normally.
 The hazard becomes historical context preserved in this section.
 
@@ -1381,7 +1420,7 @@ authoritative source for behavioral changes across versions. If the
 locally installed CLI version differs from the pinned version, STOP —
 this is failure mode F (CLI version mismatch, see below).
 
-The pinned version is captured either in CLAUDE-rev2.md alongside the
+The pinned version is captured either in CLAUDE-rev3.md alongside the
 stop-point or in a repo-committed config file. Visual inspection of
 "looks like the current version" is not sufficient; the check is exact
 version-string match.
@@ -1389,7 +1428,7 @@ version-string match.
 **Gate 4 — Linked project verified against known-good project ID.**
 
 `supabase status --linked` shows the correct project ID. The correct ID
-is stored persistently — in CLAUDE-rev2.md or a committed config file — and
+is stored persistently — in CLAUDE-rev3.md or a committed config file — and
 the verification compares the returned ID against the stored ID exactly.
 
 Visual inspection of "this looks like our project" is NOT sufficient.
@@ -1401,9 +1440,9 @@ Gate 4 is much cheaper than recovery via Mode C.
 
 The stored project ID lives in a location that (a) is committed to the
 repo (so it's version-controlled and auditable), and (b) is protected
-by the same security posture as CLAUDE-rev2.md. A dedicated config file
+by the same security posture as CLAUDE-rev3.md. A dedicated config file
 under docs/operational/ is one appropriate location; embedding the ID
-in CLAUDE-rev2.md alongside the stop-point is another. The specific location
+in CLAUDE-rev3.md alongside the stop-point is another. The specific location
 is an operator preference; the architectural commitment is that the ID
 is stored persistently rather than remembered.
 
@@ -1780,9 +1819,9 @@ baseline was successfully completed. Future operators reviewing the
 project's history can find this entry and understand what happened,
 when, and by whom.
 
-**Condition 4 — CLAUDE-rev2.md stop-point updated to RESOLVED.**
+**Condition 4 — CLAUDE-rev3.md stop-point updated to RESOLVED.**
 
-The stop-point text in CLAUDE-rev2.md (currently lines 71-83 as of this
+The stop-point text in CLAUDE-rev3.md (currently lines 71-83 as of this
 writing) is updated to RESOLVED status with the execution date. This
 is the LAST step in the Phase 4 transition. It signals that Phase 4
 is unblocked.
@@ -1790,7 +1829,7 @@ is unblocked.
 Condition 4 is deliberately last. It is not parallel to verification;
 it is the readiness signal that follows successful verification.
 Sequence: complete baseline (Conditions 1-2) -> session-handoff entry
-(Condition 3) -> CLAUDE-rev2.md update (Condition 4) -> Phase 4 unblocked.
+(Condition 3) -> CLAUDE-rev3.md update (Condition 4) -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four are met, Phase 4 work proceeds normally and the stop-point
@@ -1906,16 +1945,16 @@ record.
 
 **The stop-point becomes historical context.**
 
-Post-Phase-4-transition, the CLAUDE-rev2.md stop-point at lines 71-83
+Post-Phase-4-transition, the CLAUDE-rev3.md stop-point at lines 71-83
 (as of this writing; the specific lines will change with future
-CLAUDE-rev2.md edits) is updated to RESOLVED status. The text is preserved
-in CLAUDE-rev2.md as historical context rather than being deleted. Future
-operators reading CLAUDE-rev2.md can find both the historical hazard and
+CLAUDE-rev3.md edits) is updated to RESOLVED status. The text is preserved
+in CLAUDE-rev3.md as historical context rather than being deleted. Future
+operators reading CLAUDE-rev3.md can find both the historical hazard and
 the resolution reference.
 
-### CLAUDE-rev2.md stop-point evolution
+### CLAUDE-rev3.md stop-point evolution
 
-Per Decision 22.7, the CLAUDE-rev2.md stop-point evolves through three
+Per Decision 22.7, the CLAUDE-rev3.md stop-point evolves through three
 distinct states across the platform lifecycle:
 
 **State 1 — In force (current state as of this section).**
@@ -1951,7 +1990,7 @@ date. Suggested resolved-state text:
     Migration Tooling section for the historical hazard context
     and the procedure that resolved it.
 
-The RESOLVED state is preserved in CLAUDE-rev2.md indefinitely. It serves
+The RESOLVED state is preserved in CLAUDE-rev3.md indefinitely. It serves
 audit defensibility — future contributors can find both the historical
 hazard and its resolution without needing to reconstruct either from
 git history.
@@ -1997,7 +2036,7 @@ prompt is the safer default and is the architectural commitment.
 
 ### Cross-references
 
-- Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log-rev2.md)
+- Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log-rev3.md)
   is the architectural authority for this section. Decision 22's ten
   commitments (22.1 through 22.10) are documented here in
   reference-usable form.
@@ -2007,7 +2046,7 @@ prompt is the safer default and is the architectural commitment.
   convention that Database Migration Tooling operates within. Step 5
   of the baseline procedure and the ongoing schema.sql regeneration
   mechanic both depend on Decision 10's mechanism.
-- CLAUDE-rev2.md (lines 71-83 as of this writing) contains the stop-point
+- CLAUDE-rev3.md (lines 71-83 as of this writing) contains the stop-point
   that governs Claude Code's behavior during the pre-baseline period.
   The stop-point cross-references this section and Decision 22.
 - Data Migration Tooling section (in v2, elsewhere) covers the
@@ -2950,52 +2989,64 @@ derived, not stored on the coverage row. Historical accuracy is
 preserved even when actual_start_date is confirmed after coverages
 were created and after claims were filed.
 
-**Application invariant (per Decision 23.5a):**
+**Schema-level enforcement via database view (per Decisions 23.5a and 24):**
 
-Application code MUST use COALESCE(warranty_registrations.actual_start_date,
-warranty_coverages.start_date) for effective start date derivation in
-ALL of the following contexts:
+Decision 23.5a originally flagged schema-level enforcement (via generated
+column or view) as a Phase 4 implementation option. Decision 24 exercises
+the view option, superseding the application-layer default. The
+`effective_start_date` derivation is enforced by the
+`warranty_coverages_effective` database view, which joins
+`warranty_coverages` with its parent `warranty_registrations` and computes
+the COALESCE at the schema level.
+
+Application code MUST query `warranty_coverages_effective` for
+`effective_start_date` in ALL of the following contexts:
 
 - Claim eligibility calculations
 - Coverage window calculations
 - Warranty period displays to warrantors and customers
-- end_date derivation (see the end_date subsection below; Cat 3 #8
-  downstream)
 - Expiry warning firing calculations
-
-The COALESCE derivation with trigger_date as fallback is the mechanism
-by which Decision 23.8's warranty-starts-per-contract principle is
-enforced at the coverage level. When `actual_start_date` is null
-(warrantor has not confirmed operational activation yet), the effective
-start date falls back to `trigger_date` — the contractually-agreed
-warranty active date. This ensures customer warranty rights are never
-blocked by internal platform state: coverage calculations proceed
-based on the contractual date even when operational confirmation is
-pending. Any future Decision that touches coverage window calculations
-or claim eligibility MUST reference Decision 23.8 explicitly to
-preserve this principle.
 
 Application code MUST NEVER read `warranty_coverages.start_date`
 directly for effective start date purposes. Reading the snapshot
 directly bypasses the derivation and produces incorrect effective
-start dates whenever actual_start_date has been populated. This is a
-silent data corruption failure mode.
+start dates whenever actual_start_date has been populated — the silent
+data corruption failure mode that this enforcement mechanism exists to
+prevent.
 
-This invariant is architecturally comparable to Decision 19's atomic
-Accept-and-Signature invariant. It applies uniformly across all code
-paths that touch effective start date semantics.
+The view uses `WITH (security_invoker = true)` for RLS pass-through per
+Decision 24.5 and the Standard RLS Pattern's View security convention.
+Tenant isolation is preserved end-to-end. See the "end_date is derived,
+not stored" subsection below for the view definition, and Decision 24's
+Resolution 24.2 through 24.5 for full commitments.
 
-An alternative implementation approach that would eliminate the
-application invariant: implement effective_start_date as a PostgreSQL
-generated column on warranty_coverages (computed from a join to
-warranty_registrations) or as a view. This would enforce the
-derivation at the schema level; application code would read a single
-column. Adds implementation complexity but eliminates the cross-
-cutting invariant. Flagged as a Phase 4 implementation option;
-Decision 23 does not commit to either the invariant-enforced-in-app
-or the generated-column path. The commitment is the derivation
-semantic; the enforcement mechanism is a Phase 4 implementation
-choice.
+The generated-column alternative mentioned in the original 23.5a
+framing is architecturally unavailable: Postgres generated columns
+cannot reference columns on other tables, and the COALESCE requires
+reading `actual_start_date` from `warranty_registrations`. Only the
+view mechanism satisfies both the cross-table COALESCE requirement
+and the schema-level enforcement objective.
+
+**Application to Decision 23.8's warranty-starts-per-contract principle:**
+
+The COALESCE derivation with `start_date` (the trigger_date snapshot)
+as fallback is the mechanism by which Decision 23.8's
+warranty-starts-per-contract principle is enforced at the coverage
+level. When `actual_start_date` is null (warrantor has not confirmed
+operational activation yet), the effective start date falls back to
+`start_date` — the contractually-agreed warranty active date. This
+ensures customer warranty rights are never blocked by internal platform
+state: coverage calculations proceed based on the contractual date even
+when operational confirmation is pending.
+
+Any future Decision that touches coverage window calculations or claim
+eligibility MUST reference Decision 23.8 explicitly to preserve this
+principle. This enforcement invariant is architecturally comparable to
+Decision 19's atomic Accept-and-Signature invariant — it applies
+uniformly across all code paths that touch effective start date
+semantics, with the enforcement mechanism sitting at the schema layer
+(the view) rather than requiring distributed application-layer
+discipline.
 
 ### end_date is derived, not stored
 
@@ -3007,19 +3058,58 @@ update end_date too, or the stored value drifts. Audit defensibility
 also prefers a single source of truth — start_date and term_years are
 what the warranty agreement records; end_date is a calculation.
 
-The mechanism for the derivation is a Phase 3 implementation choice:
-either a Postgres generated column (GENERATED ALWAYS AS (start_date +
-(term_years || ' years')::interval) STORED, which makes end_date
-queryable like a regular column without the sync risk) or
-application-layer computation (every read site computes end_date from
-the two source columns). The generated-column approach is the more
-ergonomic choice — queries can filter and sort on end_date directly —
-but Postgres generated columns have constraints on what expressions
-they accept, and the term_years-to-interval conversion specifically
-should be verified against the production Postgres version. Application
-layer is the always-available fallback. The choice is settled when
-warranty_coverages is migrated; the architectural commitment (derived,
-not stored as an independent column) holds either way.
+Per Decision 24, the derivation mechanism is a database view named
+`warranty_coverages_effective` that joins `warranty_coverages` with its
+parent `warranty_registrations`. The view exposes both
+`effective_start_date` (per Decision 23.5a) and `effective_end_date` as
+computed columns, alongside the base coverage columns needed for
+downstream reads.
+
+The `effective_end_date` computation extends 23.5a's COALESCE invariant
+to end_date derivation:
+
+    effective_end_date = (
+        COALESCE(
+            warranty_registrations.actual_start_date,
+            warranty_coverages.start_date
+        ) + (warranty_coverages.term_years || ' years')::interval
+    )::date
+
+This computation lives in the view definition, not at the application
+layer. All read paths that need `effective_end_date` MUST query
+`warranty_coverages_effective`, not compute `start_date + term_years`
+against `warranty_coverages` directly. Bypassing the view reproduces
+the silent data corruption failure mode that 23.5a exists to prevent —
+if `actual_start_date` is populated but the read site uses
+`start_date + term_years` alone, the effective_end_date will be wrong
+by the offset between `actual_start_date` and `start_date`.
+
+The view uses `WITH (security_invoker = true)` for RLS pass-through
+per Decision 24.5 and the Standard RLS Pattern's view security
+convention. Tenant isolation is preserved end-to-end.
+
+Decision 24 supersedes the earlier "Phase 3 implementation choice"
+framing. The generated-column option is architecturally unavailable —
+Postgres generated columns cannot reference columns on other tables,
+and the COALESCE requires reading `actual_start_date` from
+`warranty_registrations`. Application-layer computation is
+architecturally prohibited (per 24.3) because it reintroduces the
+silent-data-corruption failure mode. The view is the sole mechanism.
+
+Contexts where the view MUST be used (per 24.3):
+
+- Claim eligibility calculations
+- Coverage window calculations
+- Warranty period displays to warrantors and customers
+- Expiry warning firing calculations
+- Reports and dashboards showing coverage timing
+- Any operational tooling that filters, sorts, or displays coverage
+  end dates
+
+The architectural commitment (derived, not stored as an independent
+column on `warranty_coverages`) holds — the base table remains
+unchanged. The view is a schema-level derivation, not a stored value
+on the base table.
 
 ### Coverages and the registration's status
 
@@ -3038,9 +3128,10 @@ is part of the prep work that must complete before Section 7 activation.
 At coverage creation, each coverage row's `start_date` is populated
 with the current `projects.trigger_date` value (per Decision 23.5's
 snapshot semantics documented in the Coverage start_date derivation
-subsection above). Each coverage row's `end_date` is derived from
-`start_date + term_years` (the mechanism is Cat 3 #8, still on the
-backlog).
+subsection above). Each coverage row's `end_date` is derived via the
+`warranty_coverages_effective` database view per Decision 24 (see the
+"end_date is derived, not stored" subsection below for the full
+mechanism).
 
 A coverage does not "count time" until the registration is active.
 While the registration is in `assigned` state, coverage rows exist but

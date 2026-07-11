@@ -2997,7 +2997,7 @@ in the repo. Phase 4 work that involves applying migrations to the
 hosted DB cannot begin until the remote migration history is
 baselined.
 
-CLAUDE-rev2.md currently documents this as a stop-point (lines 71-83):
+CLAUDE-rev3.md currently documents this as a stop-point (lines 71-83):
 do NOT run `supabase db push`, `supabase db remote commit`,
 `supabase migration up --linked`, or any command that applies local
 migrations to the hosted/remote/production database until the remote
@@ -3039,7 +3039,7 @@ Ten architectural commitments.
 **22.1: Phase 4 transition gate.**
 
 Phase 4 work involving migrations cannot begin until the baseline
-procedure is executed and verified. The CLAUDE-rev2.md stop-point
+procedure is executed and verified. The CLAUDE-rev3.md stop-point
 (currently lines 71-83) remains in force until Phase 4 transition
 criteria (22.8) are all satisfied. Until then, Claude Code must
 STOP and surface the hazard rather than running migration commands
@@ -3141,7 +3141,7 @@ documentation time. Version mismatch is failure mode F (see 22.5).
 
 **Gate 4 — Linked project verified against known-good project ID.**
 `supabase status --linked` shows the correct project ID, matched
-against the project ID stored persistently (in CLAUDE-rev2.md or a
+against the project ID stored persistently (in CLAUDE-rev3.md or a
 committed config file). A single-character typo in project ID is
 unrecoverable surgery on the wrong database. Visual inspection is
 NOT sufficient — the verification is "matches the stored ID exactly,"
@@ -3277,9 +3277,9 @@ understand both what to do and why this section exists. The section
 serves audit defensibility and protects against similar situations
 recurring.
 
-**22.7: CLAUDE-rev2.md stop-point evolution and password handling.**
+**22.7: CLAUDE-rev3.md stop-point evolution and password handling.**
 
-Current CLAUDE-rev2.md stop-point text (lines 71-83) remains in force
+Current CLAUDE-rev3.md stop-point text (lines 71-83) remains in force
 until Phase 4 transition criteria (22.8) are satisfied. After
 Decision 22 commits but before baseline is executed, the stop-point
 text is updated to cross-reference Decision 22's documented
@@ -3326,15 +3326,15 @@ Phase 4 work can begin once ALL four conditions are satisfied:
    anomalies encountered and resolved. This entry serves as the
    permanent record that baseline was successfully completed.
 
-4. **CLAUDE-rev2.md stop-point updated to RESOLVED.** The stop-point
+4. **CLAUDE-rev3.md stop-point updated to RESOLVED.** The stop-point
    text is updated to "RESOLVED" status with the execution date.
    This is the LAST step in the Phase 4 transition. It signals
    that Phase 4 is unblocked.
 
-The four conditions are ordered. Condition 4 (CLAUDE-rev2.md update) is
+The four conditions are ordered. Condition 4 (CLAUDE-rev3.md update) is
 the LAST step that signals readiness, not parallel to verification.
 Sequence: complete baseline -> verify (Steps 4 and 5) -> session
-handoff entry -> CLAUDE-rev2.md update -> Phase 4 unblocked.
+handoff entry -> CLAUDE-rev3.md update -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four, Phase 4 work proceeds normally and the stop-point becomes
@@ -3439,7 +3439,7 @@ transition gating.
 
 ### Cross-section dependencies
 
-- **CLAUDE-rev2.md (project-level operational rules):** Stop-point text
+- **CLAUDE-rev3.md (project-level operational rules):** Stop-point text
   updated per 22.7. Stop-point itself remains in force until Phase
   4 transition criteria are satisfied per 22.8.
 - **New section "Database Migration Tooling" in architecture-
@@ -3482,7 +3482,7 @@ transition gating.
 **New section in v2's architecture reference:** Database Migration
 Tooling. Section content per 22.6.
 
-**CLAUDE-rev2.md stop-point evolution per 22.7:** Cross-reference
+**CLAUDE-rev3.md stop-point evolution per 22.7:** Cross-reference
 updated to point to Decision 22 and the new Database Migration Tooling
 section. Stop-point itself remains in force.
 
@@ -4146,7 +4146,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Cross-section dependencies
 
-- **Project section** (in v2's architecture-reference-v2-rev2.md):
+- **Project section** (in v2's architecture-reference-v2-rev3.md):
   - trigger_date semantics revision for `contractual_date_manual`
     (23.1) with column comment update
   - Lifecycle subsection needs updates reflecting trigger_date-at-
@@ -4274,7 +4274,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Decision implications for already-committed sections
 
-**Project section (in v2's architecture-reference-v2-rev2.md):**
+**Project section (in v2's architecture-reference-v2-rev3.md):**
 
 - Lifecycle subsection updates per 23.1, 23.2, 23.11
 - New "Migration and import handling" subsection or paragraph per
@@ -4645,3 +4645,288 @@ not just resolving this one case.
 Not yet drafted. Captured here as future scope for the Decision
 session that takes up reserve forecasting. Priority ordering:
 after the 11 Cat 3 backlog items and Decision 17 resolve.
+
+---
+
+## Decision 24: end_date Derivation Mechanism (Warranty Type Coverages)
+
+**Decided in Session D (Cat 3 backlog resolution).**
+
+### Context
+
+Decision 23.5a locked that effective_start_date is derived via
+COALESCE(warranty_registrations.actual_start_date,
+warranty_coverages.start_date), with enforcement flagged as either
+an application-layer invariant OR a schema-level mechanism
+(generated column or view) as a Phase 4 implementation option. The
+current v2 Warranty Type Coverages section carries the "end_date is
+derived, not stored" commitment and names two candidate mechanisms
+(Postgres generated column vs. application-layer computation),
+deferring the choice.
+
+Cat 3 backlog item #8 asked for the end_date derivation mechanism
+to be locked. Chat 3's independent architectural review surfaced
+that a generated column cannot express the cross-table COALESCE
+(Postgres generated columns may only reference columns on their
+own table), reducing the real choice to application-layer
+computation vs. a database view.
+
+This Decision resolves the mechanism choice for BOTH
+effective_start_date AND effective_end_date via a single database
+view, exercising the schema-level enforcement option that Decision
+23.5a flagged. It supersedes 23.5a's application-layer default and
+extends the invariant family to end_date.
+
+### Question
+
+What mechanism enforces the COALESCE derivation for effective start
+and effective end dates on warranty coverages, and how does that
+mechanism interact with the Standard RLS Pattern's tenant isolation
+guarantees?
+
+### Resolution
+
+Seven architectural commitments.
+
+**24.1: No end_date column is added to warranty_coverages.**
+
+Confirms the already-locked "derived, not stored" commitment. The
+base warranty_coverages table remains as-is: start_date is an
+immutable snapshot of trigger_date at coverage creation, term_years
+is the immutable term length. No end_date column, no
+effective_end_date column, no snapshot-only computed value on the
+base table.
+
+**24.2: A database view named warranty_coverages_effective is
+created.**
+
+The view joins warranty_coverages with its parent
+warranty_registrations and exposes computed effective_start_date
+and effective_end_date columns alongside the base coverage columns
+needed for downstream reads.
+
+View definition:
+
+    CREATE VIEW warranty_coverages_effective
+    WITH (security_invoker = true)
+    AS
+    SELECT
+      c.id,
+      c.tenant_id,
+      c.warranty_registration_id,
+      c.warranty_type_id,
+      c.start_date,
+      c.term_years,
+      COALESCE(r.actual_start_date, c.start_date)
+        AS effective_start_date,
+      (COALESCE(r.actual_start_date, c.start_date)
+        + (c.term_years || ' years')::interval)::date
+        AS effective_end_date
+    FROM warranty_coverages c
+    JOIN warranty_registrations r
+      ON r.id = c.warranty_registration_id;
+
+The view exposes both effective_start_date and effective_end_date
+in a single object so that application code and operational tooling
+have one canonical read surface for coverage timing.
+
+**24.3: Application code reads warranty_coverages_effective for
+effective start/end dates.**
+
+All read paths that need effective_start_date or effective_end_date
+MUST query warranty_coverages_effective, not warranty_coverages
+directly. The base table's start_date and term_years remain
+readable for schema-inspection or historical-snapshot purposes, but
+any read that treats them as effective values is architecturally
+prohibited.
+
+Contexts where the view MUST be used:
+
+- Claim eligibility calculations
+- Coverage window calculations
+- Warranty period displays to warrantors and customers
+- Expiry warning firing calculations (warranty_expiry_warning clock
+  events)
+- Reports and dashboards showing coverage timing
+- Any operational tooling that filters, sorts, or displays coverage
+  end dates
+
+Reading warranty_coverages.start_date + term_years directly at the
+application layer, bypassing the view, reproduces the silent data
+corruption failure mode 23.5a exists to prevent. This is
+architecturally prohibited.
+
+**24.4: The 23.5a invariant is now schema-enforced via the view,
+not application-layer.**
+
+This commitment supersedes Decision 23.5a's application-layer
+default. Decision 23.5a explicitly flagged "PostgreSQL generated
+column or view" as a Phase 4 implementation option; Decision 24
+exercises the view option.
+
+Both effective_start_date and effective_end_date are enforced at
+the schema level via warranty_coverages_effective's column
+definitions. The application-layer MUST/MUST NEVER language in
+23.5a is retained conceptually but its enforcement mechanism shifts
+from "every read site applies COALESCE" to "every read site queries
+the view."
+
+Scope boundary: Decision 23.9's claim eligibility COALESCE operates
+on projects.trigger_date as the fallback (different parent entity
+than warranty_coverages.start_date). Decision 24's view does NOT
+cover Decision 23.9's derivation — 23.9 remains application-layer
+because it involves a different join structure. Decision 24 covers
+coverage-level derivations only.
+
+**24.5: The view uses security_invoker = true for RLS pass-through.**
+
+Postgres views default to executing with the view owner's
+privileges (SECURITY DEFINER behavior). Without security_invoker =
+true, the view would bypass Row-Level Security policies on the
+underlying tables, creating a cross-tenant data leak vector.
+
+The security_invoker = true attribute (Postgres 15+) causes the
+view to execute with the querying user's privileges, respecting
+RLS policies on warranty_coverages and warranty_registrations.
+Tenant isolation is preserved.
+
+This attribute is REQUIRED and non-optional. Any migration
+creating this view MUST include WITH (security_invoker = true).
+Any view alteration MUST preserve the attribute.
+
+The missing-GRANTs incident from Phase 1 (a table with missing
+grants that PostgREST could not see at all) is the precedent for
+treating view security as a first-class schema concern. The
+Standard RLS Pattern is being extended in this Decision's cascade
+to formalize the security_invoker convention for all future views.
+
+**24.6: Cross-reference discipline.**
+
+Per Decision 23.8's cross-reference expectation, any Decision
+touching claim eligibility, coverage window calculations, or
+customer-facing timing MUST reference 23.8 explicitly. Decision 24
+touches all three via the view's effective_end_date exposure.
+
+Decision 24 acknowledges Decision 23.8's warranty-starts-per-
+contract principle: the view's COALESCE derivation with start_date
+(the trigger_date snapshot) as fallback preserves the customer's
+contractual warranty rights when actual_start_date is not yet
+confirmed. Coverage end calculations proceed based on the
+contractual date, not blocked by pending warrantor operational
+confirmation.
+
+Future Decisions touching coverage expiration, claim eligibility,
+warranty period display, or expiry warning firing MUST reference
+both 23.5a (as refined by 24.4) and Decision 24 as the
+authoritative sources for effective start/end date derivation.
+
+**24.7: Materialized view question deferred.**
+
+For very large coverage tables with high-read patterns, a
+materialized view might offer performance advantages over the
+standard view via cached results. Decision 24 does not commit to
+materialized view semantics. Rationale:
+
+- Prototype-phase performance requirements are not yet
+  characterized
+- Materialized views add refresh-management complexity (when to
+  refresh, refresh triggers, stale-read tolerance)
+- The standard view meets correctness requirements and is
+  operationally simpler
+- If read performance becomes a bottleneck, a future Decision can
+  convert to materialized
+
+Deferred, not foreclosed. Flagged for revisit if operational
+pressure surfaces.
+
+### Schema changes
+
+One schema addition:
+
+- New view: warranty_coverages_effective
+- Attribute: WITH (security_invoker = true) — REQUIRED
+- Join: warranty_coverages c JOIN warranty_registrations r
+  ON r.id = c.warranty_registration_id
+- Exposed columns: base coverage columns (id, tenant_id,
+  warranty_registration_id, warranty_type_id, start_date,
+  term_years) plus computed effective_start_date and
+  effective_end_date
+
+No changes to warranty_coverages base table. No changes to
+warranty_registrations base table.
+
+Migration must include appropriate GRANTs on the view for the
+application role that PostgREST uses, following the same pattern
+as base table GRANTs. Missing GRANTs on the view will produce the
+same failure mode as missing GRANTs on a table.
+
+### Cross-section dependencies
+
+- **Warranty Type Coverages section** (v2):
+  - "end_date is derived, not stored" subsection: update to reflect
+    view-based mechanism per 24.1, 24.2, 24.3
+  - "Coverage start_date derivation" subsection: update to note
+    schema-level enforcement per 24.4
+  - Possibly a new subsection or paragraph on
+    warranty_coverages_effective view semantics
+
+- **Standard RLS Pattern section** (v2):
+  - New subsection or paragraph on view security convention:
+    views on tenant-scoped tables MUST use security_invoker = true
+    (Postgres 15+ required). References Decision 24 as trigger case
+    and the missing-GRANTs Phase 1 precedent.
+
+- **Decision 22 (Database Migration Tooling)**: The view addition
+  is a Phase 4 migration. Standard Phase 4 operational path applies
+  (author migration file locally, test, run supabase db push after
+  baseline complete, verify with schema.sql regeneration). No
+  additional Decision 22 commitments required.
+
+- **Cat 3 #1 (Claim eligibility rules)**: When Cat 3 #1 is
+  resolved, its eligibility logic MUST use
+  warranty_coverages_effective per 24.3. Decision 23.9's separate
+  COALESCE (on projects.trigger_date) remains application-layer per
+  24.4 scope boundary.
+
+### Open architectural questions deferred
+
+- **View column subset.** Decision 24 exposes base coverage columns
+  plus effective_start_date and effective_end_date. Whether
+  additional derived columns (e.g., days_remaining,
+  is_active_flag) should be exposed via the view is deferred to
+  operational need.
+
+- **Materialized view path.** Per 24.7.
+
+- **View-based enforcement for Decision 23.9.** Decision 23.9's
+  claim eligibility COALESCE could theoretically be enforced via a
+  parallel view joining projects with warranty_registrations. Not
+  in scope for Decision 24; deferred pending operational pressure.
+
+### Decision implications for already-committed sections
+
+**Standard RLS Pattern section:**
+- New "View security convention" subsection (or paragraph within
+  an existing subsection) documenting the security_invoker = true
+  requirement per 24.5
+
+**Warranty Type Coverages section:**
+- "end_date is derived, not stored" subsection rewritten to reflect
+  view-based mechanism
+- "Coverage start_date derivation" subsection updated to note
+  schema-level enforcement supersedes application-layer default
+- Possibly new subsection introducing warranty_coverages_effective
+
+**No section-level updates required for Claim Intake Data Model**
+(that section is Tier 3 deferred).
+
+### Cat 3 backlog impact
+
+- Item #8 (end_date derivation mechanism) resolved by this Decision
+- Remaining Cat 3 backlog: THREE items (was four pre-Decision-24)
+  - #1 Claim eligibility rules + emergency carve-outs
+  - #5 ALA reminder notifications via clock_events
+  - #9 Customer-O&M Authorization document architecture
+
+Section cascade updates land in subsequent commits this session.
+
