@@ -1,4 +1,4 @@
-**Last updated:** 516277c 2026-07-10
+**Last updated:** 375bcfb 2026-07-11
 
 # WarrantyOS — Architectural Reference (v2, Prototype Phase)
 
