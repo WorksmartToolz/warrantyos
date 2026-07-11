@@ -2997,7 +2997,7 @@ in the repo. Phase 4 work that involves applying migrations to the
 hosted DB cannot begin until the remote migration history is
 baselined.
 
-CLAUDE-rev4.md currently documents this as a stop-point (lines 71-83):
+CLAUDE-rev5.md currently documents this as a stop-point (lines 71-83):
 do NOT run `supabase db push`, `supabase db remote commit`,
 `supabase migration up --linked`, or any command that applies local
 migrations to the hosted/remote/production database until the remote
@@ -3039,7 +3039,7 @@ Ten architectural commitments.
 **22.1: Phase 4 transition gate.**
 
 Phase 4 work involving migrations cannot begin until the baseline
-procedure is executed and verified. The CLAUDE-rev4.md stop-point
+procedure is executed and verified. The CLAUDE-rev5.md stop-point
 (currently lines 71-83) remains in force until Phase 4 transition
 criteria (22.8) are all satisfied. Until then, Claude Code must
 STOP and surface the hazard rather than running migration commands
@@ -3141,7 +3141,7 @@ documentation time. Version mismatch is failure mode F (see 22.5).
 
 **Gate 4 — Linked project verified against known-good project ID.**
 `supabase status --linked` shows the correct project ID, matched
-against the project ID stored persistently (in CLAUDE-rev4.md or a
+against the project ID stored persistently (in CLAUDE-rev5.md or a
 committed config file). A single-character typo in project ID is
 unrecoverable surgery on the wrong database. Visual inspection is
 NOT sufficient — the verification is "matches the stored ID exactly,"
@@ -3277,9 +3277,9 @@ understand both what to do and why this section exists. The section
 serves audit defensibility and protects against similar situations
 recurring.
 
-**22.7: CLAUDE-rev4.md stop-point evolution and password handling.**
+**22.7: CLAUDE-rev5.md stop-point evolution and password handling.**
 
-Current CLAUDE-rev4.md stop-point text (lines 71-83) remains in force
+Current CLAUDE-rev5.md stop-point text (lines 71-83) remains in force
 until Phase 4 transition criteria (22.8) are satisfied. After
 Decision 22 commits but before baseline is executed, the stop-point
 text is updated to cross-reference Decision 22's documented
@@ -3326,15 +3326,15 @@ Phase 4 work can begin once ALL four conditions are satisfied:
    anomalies encountered and resolved. This entry serves as the
    permanent record that baseline was successfully completed.
 
-4. **CLAUDE-rev4.md stop-point updated to RESOLVED.** The stop-point
+4. **CLAUDE-rev5.md stop-point updated to RESOLVED.** The stop-point
    text is updated to "RESOLVED" status with the execution date.
    This is the LAST step in the Phase 4 transition. It signals
    that Phase 4 is unblocked.
 
-The four conditions are ordered. Condition 4 (CLAUDE-rev4.md update) is
+The four conditions are ordered. Condition 4 (CLAUDE-rev5.md update) is
 the LAST step that signals readiness, not parallel to verification.
 Sequence: complete baseline -> verify (Steps 4 and 5) -> session
-handoff entry -> CLAUDE-rev4.md update -> Phase 4 unblocked.
+handoff entry -> CLAUDE-rev5.md update -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four, Phase 4 work proceeds normally and the stop-point becomes
@@ -3439,7 +3439,7 @@ transition gating.
 
 ### Cross-section dependencies
 
-- **CLAUDE-rev4.md (project-level operational rules):** Stop-point text
+- **CLAUDE-rev5.md (project-level operational rules):** Stop-point text
   updated per 22.7. Stop-point itself remains in force until Phase
   4 transition criteria are satisfied per 22.8.
 - **New section "Database Migration Tooling" in architecture-
@@ -3482,7 +3482,7 @@ transition gating.
 **New section in v2's architecture reference:** Database Migration
 Tooling. Section content per 22.6.
 
-**CLAUDE-rev4.md stop-point evolution per 22.7:** Cross-reference
+**CLAUDE-rev5.md stop-point evolution per 22.7:** Cross-reference
 updated to point to Decision 22 and the new Database Migration Tooling
 section. Stop-point itself remains in force.
 
@@ -4146,7 +4146,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Cross-section dependencies
 
-- **Project section** (in v2's architecture-reference-v2-rev4.md):
+- **Project section** (in v2's architecture-reference-v2-rev5.md):
   - trigger_date semantics revision for `contractual_date_manual`
     (23.1) with column comment update
   - Lifecycle subsection needs updates reflecting trigger_date-at-
@@ -4274,7 +4274,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Decision implications for already-committed sections
 
-**Project section (in v2's architecture-reference-v2-rev4.md):**
+**Project section (in v2's architecture-reference-v2-rev5.md):**
 
 - Lifecycle subsection updates per 23.1, 23.2, 23.11
 - New "Migration and import handling" subsection or paragraph per
@@ -5118,4 +5118,123 @@ ALA System section — new "Revise-and-resend" subsection added.
 
 Not a numbered Cat 3 item — resolves a Decision 19 deferral, surfaced by
 operational pressure.
+
+---
+
+## Decision 27: WarrantyID Early Issuance and Claim Eligibility Rules (Cat 3 #1 resolved)
+
+**Decided in Session E.**
+
+### Context
+
+Gate 1's "WarrantyID Valid" check and Decisions 23.8/23.9's warranty-
+starts-per-contract principle were in direct tension: WarrantyID is
+issued only at full Section 7 completion, but a customer's contractual
+coverage can begin (effective_start_date) while the registration is
+still assigned, mid-prep. Andre's operational position resolves this as:
+no WarrantyID, no claim — full stop — but the customer's contractual
+right to file cannot be held hostage by the warrantor's internal prep
+pace. The resolution is to decouple issuance of the identifier from
+completion of the review gate, not to weaken either rule.
+
+### Resolution
+
+**27.1: WarrantyID issuance is split from Section 7 completion.**
+Previously, Section 7 passing both issued the WarrantyID and
+transitioned status to active in one act (architecture reference,
+"Section 7 activation gate" subsection). This is revised: WarrantyID
+issuance now happens no later than effective_start_date (23.9),
+independent of whether Section 7 has been reviewed. Section 7's role —
+the review gate, the assigned -> active transition, activated_at — is
+unchanged. It simply no longer needs to generate the identifier if one
+already exists.
+
+**27.2: New clock event warranty_id_early_issuance**, scheduled in the
+same atomic Server Action that creates the registration (Decision
+23.3), fires_at = trigger_date, entity_type = 'warranty_registration'.
+At firing: if warranty_id is already non-null (Section 7 already
+passed), no-op. Otherwise, issue warranty_id now via
+tenant_id_sequences — same generation mechanism Section 7 already uses
+— without touching status or activated_at. Prep may genuinely still be
+incomplete; only the identifier is issued.
+
+**27.3: actual_start_date confirmation keeps the clock event in sync,
+following the existing convention.** Decision 9's "Server Actions keep
+clock_events in sync" pattern already requires trigger-date updates to
+update fires_at on the pending row — this extends the same discipline.
+When actual_start_date is confirmed (23.4), the Server Action
+recomputes effective_start_date = COALESCE(actual_start_date,
+trigger_date) and updates warranty_id_early_issuance.fires_at to the
+earlier of the current scheduled value and the recomputed date — never
+later, per 23.8. If the recomputed date is already in the past, the
+Server Action issues warranty_id synchronously in the same transaction
+rather than waiting for the next cron poll.
+
+**27.4: Claim eligibility reduces to a single check, by construction:
+warranty_id IS NOT NULL.** Because 27.2/27.3 guarantee warranty_id is
+issued at or before effective_start_date, a claim being filable and
+effective_start_date having passed become the same fact once WarrantyID
+exists. Gate 1's existing "WarrantyID Valid" check is sufficient at
+filing time; no separate date comparison is needed downstream. This is
+a real simplification, not just a restatement — it collapses two
+previously-conflicting checks into one.
+
+**27.5: Emergency carve-out is a filing-timing rule layered on top of
+27.4, not a bypass of it.** Per the Accepted/Denied Claim Lifecycle
+SOPs, a customer facing an emergency may stabilize first and has 24
+hours from that moment to file the formal claim. The 24-hour clock
+starts at the customer-reported stabilization moment, not at formal
+submission. Two new claim-shell columns:
+
+    is_emergency              boolean NOT NULL DEFAULT false
+    emergency_stabilized_at   timestamptz nullable
+                              -- customer-reported; required when
+                              --   is_emergency = true
+                              -- self-reported at intake, not
+                              --   independently verified by the
+                              --   platform
+
+**27.6: The 24-hour window is not a submission-blocking validation.**
+The customer is reporting a past event they experienced before ever
+touching the platform; the platform cannot retroactively deny them the
+ability to file based on their own report of when they stabilized.
+Instead, emergency_window_exceeded (derived: now() -
+emergency_stabilized_at > 24 hours, not stored) is surfaced to the Gate
+1 reviewer as input to Administrative Validation's existing
+three-outcome shape (Pass / Correction Required / Deny) — reviewer
+judgment, not a hard platform gate.
+
+**27.7: Emergency claims are still subject to 27.4.** No carve-out from
+the WarrantyID requirement. If a genuine emergency occurs before
+effective_start_date has arrived, there is no warranty in force yet to
+claim against — this is a coverage-period question, not a
+claim-eligibility one, and out of scope here. In practice, 27.2/27.3
+keep the gap between effective_start_date and warranty_id issuance to
+at most one hourly cron cycle, so this is not expected to be a live
+operational problem.
+
+### Schema additions
+
+Two new claim-shell columns (is_emergency, emergency_stabilized_at);
+one new clock event type warranty_id_early_issuance; new
+clock_events.entity_type value warranty_registration.
+
+### Decision implications for already-committed sections
+
+**Revises already-locked content**, not purely additive: the "Section 7
+activation gate" and "WarrantyID issuance, not assignment at creation"
+subsections both describe WarrantyID generation as happening strictly
+at Section 7 completion — both need revision to reflect that WarrantyID
+may now be issued earlier. **Warranty Registration section:**
+Clock-event interactions subsection gets the new event type. **Claim
+(Shell) section:** shell schema gets the two new columns; the "Claim
+eligibility rules" deferred-text paragraph and the "What Tier 3 will
+add" bullet both get resolved rather than left deferred. **Clock Event
+Infrastructure section:** entity_type enum comment gets
+warranty_registration added.
+
+### Cat 3 backlog impact
+
+Item #1 resolved. Remaining: ONE item — #9 (Customer-O&M Authorization
+document architecture).
 
