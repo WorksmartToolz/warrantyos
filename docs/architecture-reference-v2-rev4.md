@@ -861,8 +861,10 @@ status update on this table, not a mutation on the underlying entity).
                       -- see event-type enum below
                       -- CHECK constraint enforces allowed values
       entity_type     text NOT NULL
-                      -- 'project' | 'claim' | 'warranty_coverage'
-                      -- | (extensible)
+                      -- 'project' | 'claim' | 'warranty_coverage' |
+                      -- 'work_authorization_document' |
+                      -- 'service_report' | 'ala_document' |
+                      -- (extensible)
                       -- CHECK constraint enforces allowed values
       entity_id       uuid NOT NULL
       fires_at        timestamptz NOT NULL
@@ -888,9 +890,9 @@ The partial index on pending fires_at is the load-bearing one — the cron
 handler queries it every hour to find what to dispatch, and the partial filter
 keeps the index small as fired and cancelled events accumulate.
 
-### Phase 1 event types
+### Event types
 
-The event_type enum is extensible. Phase 1 includes:
+The event_type enum is extensible. The full set as of Decision 25:
 
 - registration_prep_pre_trigger — fires registration_lead_time_days before a
   known trigger date. Used for EPC trigger sources (contractual_date_manual and
@@ -908,6 +910,22 @@ The event_type enum is extensible. Phase 1 includes:
   defaults to (delivery window + grace period), both tenant-configurable, with
   sensible Phase 3 defaults to be set during supply-only-flow drafting. Added
   by Item 17.
+- service_report_response_due — fires when a service report's customer review
+  window expires. If customer_decision is still null at firing, the row is
+  updated to customer_decision = 'accepted', accepted_by_acquiescence = true,
+  and claim closure is initiated. Added by Service Report Submission.
+- work_authorization_response_overdue — fires when a Work Authorization
+  document's expected_response_date passes with customer_decision still null.
+  Reminder-only; no state mutation. Added by Customer Work Authorization
+  (Decision 11).
+- ala_decline_window_expired — fires at decided_at +
+  ala_decline_recant_window_days when claimant_decision = 'declined'; marks
+  the decline permanently terminal and unblocks claim denial workflow. Added
+  by Decision 19.
+- ala_response_overdue — fires when an ALA's response window (tenant-
+  configurable business days, default 7) expires with claimant_decision still
+  null. Reminder-only; sets overdue_flagged_at without touching
+  claimant_decision. Added by Decision 25.
 
 ### Not every transition is a clock event
 
@@ -1207,7 +1225,7 @@ six pre-procedure verification gates per Decision 22.3, the drift verification
 gate per Decision 22.9, the six named failure modes per Decision 22.5, the
 Mode C gating per Decision 22.10, and the four Phase 4 transition criteria per
 Decision 22.8 are architecturally locked. Procedure execution against the
-hosted database is Phase 4 work, gated by the CLAUDE-rev3.md stop-point until all
+hosted database is Phase 4 work, gated by the CLAUDE-rev4.md stop-point until all
 four transition criteria in Decision 22.8 are satisfied. This section is the
 authoritative reference for the procedure and for ongoing migration tooling
 mechanics across the platform lifecycle.)
@@ -1224,7 +1242,7 @@ schema mechanics; Data Migration Tooling covers customer data mechanics.
 Both are load-bearing for the platform, and they are architecturally
 independent.
 
-Decision 22 (session-handoffs/5e-bridge-phase3-decisions-log-rev3.md) is the
+Decision 22 (session-handoffs/5e-bridge-phase3-decisions-log-rev4.md) is the
 architectural authority for the material in this section. This section
 documents Decision 22's ten commitments in reference-usable form and adds
 the ongoing operational mechanics that Decision 22 flagged as belonging in
@@ -1261,7 +1279,7 @@ the CLI will attempt to apply migrations 000 through the newest one,
 detecting that migration 000 has not been applied per migration_history,
 and attempting to CREATE TABLE tenants (which already exists) — producing
 either an error or, worse, silent corruption depending on the specific
-migration content. The CLAUDE-rev3.md stop-point (lines 71-83 as of this
+migration content. The CLAUDE-rev4.md stop-point (lines 71-83 as of this
 writing) documents this hazard and instructs Claude Code to STOP before
 running any command that could trigger this failure.
 
@@ -1274,7 +1292,7 @@ completes, subsequent supabase db push commands only attempt to apply
 migrations 005 and later.
 
 This is a one-time procedure. Once baseline is complete and Phase 4
-transition criteria per Decision 22.8 are all satisfied, the CLAUDE-rev3.md
+transition criteria per Decision 22.8 are all satisfied, the CLAUDE-rev4.md
 stop-point is updated to RESOLVED and Phase 4 work proceeds normally.
 The hazard becomes historical context preserved in this section.
 
@@ -1420,7 +1438,7 @@ authoritative source for behavioral changes across versions. If the
 locally installed CLI version differs from the pinned version, STOP —
 this is failure mode F (CLI version mismatch, see below).
 
-The pinned version is captured either in CLAUDE-rev3.md alongside the
+The pinned version is captured either in CLAUDE-rev4.md alongside the
 stop-point or in a repo-committed config file. Visual inspection of
 "looks like the current version" is not sufficient; the check is exact
 version-string match.
@@ -1428,7 +1446,7 @@ version-string match.
 **Gate 4 — Linked project verified against known-good project ID.**
 
 `supabase status --linked` shows the correct project ID. The correct ID
-is stored persistently — in CLAUDE-rev3.md or a committed config file — and
+is stored persistently — in CLAUDE-rev4.md or a committed config file — and
 the verification compares the returned ID against the stored ID exactly.
 
 Visual inspection of "this looks like our project" is NOT sufficient.
@@ -1440,9 +1458,9 @@ Gate 4 is much cheaper than recovery via Mode C.
 
 The stored project ID lives in a location that (a) is committed to the
 repo (so it's version-controlled and auditable), and (b) is protected
-by the same security posture as CLAUDE-rev3.md. A dedicated config file
+by the same security posture as CLAUDE-rev4.md. A dedicated config file
 under docs/operational/ is one appropriate location; embedding the ID
-in CLAUDE-rev3.md alongside the stop-point is another. The specific location
+in CLAUDE-rev4.md alongside the stop-point is another. The specific location
 is an operator preference; the architectural commitment is that the ID
 is stored persistently rather than remembered.
 
@@ -1819,9 +1837,9 @@ baseline was successfully completed. Future operators reviewing the
 project's history can find this entry and understand what happened,
 when, and by whom.
 
-**Condition 4 — CLAUDE-rev3.md stop-point updated to RESOLVED.**
+**Condition 4 — CLAUDE-rev4.md stop-point updated to RESOLVED.**
 
-The stop-point text in CLAUDE-rev3.md (currently lines 71-83 as of this
+The stop-point text in CLAUDE-rev4.md (currently lines 71-83 as of this
 writing) is updated to RESOLVED status with the execution date. This
 is the LAST step in the Phase 4 transition. It signals that Phase 4
 is unblocked.
@@ -1829,7 +1847,7 @@ is unblocked.
 Condition 4 is deliberately last. It is not parallel to verification;
 it is the readiness signal that follows successful verification.
 Sequence: complete baseline (Conditions 1-2) -> session-handoff entry
-(Condition 3) -> CLAUDE-rev3.md update (Condition 4) -> Phase 4 unblocked.
+(Condition 3) -> CLAUDE-rev4.md update (Condition 4) -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four are met, Phase 4 work proceeds normally and the stop-point
@@ -1945,16 +1963,16 @@ record.
 
 **The stop-point becomes historical context.**
 
-Post-Phase-4-transition, the CLAUDE-rev3.md stop-point at lines 71-83
+Post-Phase-4-transition, the CLAUDE-rev4.md stop-point at lines 71-83
 (as of this writing; the specific lines will change with future
-CLAUDE-rev3.md edits) is updated to RESOLVED status. The text is preserved
-in CLAUDE-rev3.md as historical context rather than being deleted. Future
-operators reading CLAUDE-rev3.md can find both the historical hazard and
+CLAUDE-rev4.md edits) is updated to RESOLVED status. The text is preserved
+in CLAUDE-rev4.md as historical context rather than being deleted. Future
+operators reading CLAUDE-rev4.md can find both the historical hazard and
 the resolution reference.
 
-### CLAUDE-rev3.md stop-point evolution
+### CLAUDE-rev4.md stop-point evolution
 
-Per Decision 22.7, the CLAUDE-rev3.md stop-point evolves through three
+Per Decision 22.7, the CLAUDE-rev4.md stop-point evolves through three
 distinct states across the platform lifecycle:
 
 **State 1 — In force (current state as of this section).**
@@ -1990,7 +2008,7 @@ date. Suggested resolved-state text:
     Migration Tooling section for the historical hazard context
     and the procedure that resolved it.
 
-The RESOLVED state is preserved in CLAUDE-rev3.md indefinitely. It serves
+The RESOLVED state is preserved in CLAUDE-rev4.md indefinitely. It serves
 audit defensibility — future contributors can find both the historical
 hazard and its resolution without needing to reconstruct either from
 git history.
@@ -2036,7 +2054,7 @@ prompt is the safer default and is the architectural commitment.
 
 ### Cross-references
 
-- Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log-rev3.md)
+- Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log-rev4.md)
   is the architectural authority for this section. Decision 22's ten
   commitments (22.1 through 22.10) are documented here in
   reference-usable form.
@@ -2046,7 +2064,7 @@ prompt is the safer default and is the architectural commitment.
   convention that Database Migration Tooling operates within. Step 5
   of the baseline procedure and the ongoing schema.sql regeneration
   mechanic both depend on Decision 10's mechanism.
-- CLAUDE-rev3.md (lines 71-83 as of this writing) contains the stop-point
+- CLAUDE-rev4.md (lines 71-83 as of this writing) contains the stop-point
   that governs Claude Code's behavior during the pre-baseline period.
   The stop-point cross-references this section and Decision 22.
 - Data Migration Tooling section (in v2, elsewhere) covers the
@@ -4178,6 +4196,51 @@ and BLOCKS acceptance attempts where actor contact_type IN
 commitment agency is not yet supported" error. Tenants who require
 O&M Provider ALA acceptance must wait for Cat 3 #9 to land.
 
+### Response window, overdue flag, and re-issue
+
+Per Decision 25, an unsigned ALA does not stay open indefinitely. A
+tenant-configurable business-day window (tenants.settings.
+ala_response_overdue_business_days, default 7, bounds 3-30) opens at
+document creation. Business-day math skips weekends and any date in the
+tenant's tenant_holidays table — a new per-tenant list, platform-seeded
+with U.S. federal holidays at provisioning, tenant-owned thereafter, same
+provisioning philosophy as the Tenant-Editable Defaults Pattern.
+
+If the window expires with claimant_decision still null, the
+ala_response_overdue clock event fires: overdue_flagged_at is set on the
+row, and the claimant receives an email explaining the window closed with
+no decision recorded. claimant_decision and signed_at are untouched — no
+decision is made on the claimant's behalf. The Indistinct blocking gate
+remains closed per Decision 19.7; overdue_flagged_at is a marker layered
+on the existing unsigned state, not a fourth state in the state machine.
+
+The warrantor is notified when the claimant explicitly Accepts or
+Declines (new commitment, Decision 25.6) — synchronous Server Action
+side effect at the moment claimant_decision commits. This makes the
+absence of that notification a meaningful signal: no notification means
+no response, without requiring a separate overdue push to the warrantor.
+
+Re-issue is warrantor-invoked, mirroring the decline-recant re-issue
+mechanic (Decision 19.9): writes an audit entry, clears
+overdue_flagged_at, regenerates claimant_token and
+claimant_token_expires_at, resends the link, and schedules a fresh
+ala_response_overdue event. There is no forced auto-terminal state —
+overdue-and-flagged persists until the warrantor re-issues or manually
+escalates through the existing Escalated/Denied claim pathway.
+
+### Revise-and-resend
+
+Per Decision 26, resolving the revise-and-resend question this section
+previously deferred: a new child table, ala_document_revisions, captures
+content changes to an ALA without violating the UNIQUE(claim_id)
+constraint on ala_documents, which stays exactly as locked. A revise
+action updates content_snapshot and markup_percent_snapshot on the
+existing row, logs the prior state (who, why, what changed) in the child
+table, clears overdue_flagged_at if set, and resends the link. Revising a
+signed ALA (signed_at IS NOT NULL) is blocked at v1 — the gate is already
+cleared on the strength of that signature — mirroring the O&M provider
+blocking convention above.
+
 ### What is NOT in the ALA system
 
 Parallel to the deliberate-omissions lists elsewhere:
@@ -4186,11 +4249,11 @@ Parallel to the deliberate-omissions lists elsewhere:
   not custom field definitions on the claim. The Custom Field System is
   for fields that vary by tenant on claim entities; ALA templates are
   documents.
-- No clock events. ALA generation is a synchronous Server Action effect
-  on the Indistinct outcome, not a future-firing event. Reminder
-  notifications to a claimant who has not signed within some window
-  might use clock events in a future iteration, but no locked source
-  specifies this yet.
+- ALA generation itself is not a clock event. The document is created
+  synchronously by the Server Action handling the Indistinct outcome, not
+  a future-firing event. Response-overdue reminders ARE a clock event
+  (ala_response_overdue, Decision 25) — see the "Response window,
+  overdue flag, and re-issue" subsection above.
 - No automatic enforcement of the markup-bounds at the database level.
   Decision 7 places that validation in the application layer; the
   tenants.settings JSONB does not enforce numeric bounds in PostgreSQL

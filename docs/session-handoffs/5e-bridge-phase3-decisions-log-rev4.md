@@ -2997,7 +2997,7 @@ in the repo. Phase 4 work that involves applying migrations to the
 hosted DB cannot begin until the remote migration history is
 baselined.
 
-CLAUDE-rev3.md currently documents this as a stop-point (lines 71-83):
+CLAUDE-rev4.md currently documents this as a stop-point (lines 71-83):
 do NOT run `supabase db push`, `supabase db remote commit`,
 `supabase migration up --linked`, or any command that applies local
 migrations to the hosted/remote/production database until the remote
@@ -3039,7 +3039,7 @@ Ten architectural commitments.
 **22.1: Phase 4 transition gate.**
 
 Phase 4 work involving migrations cannot begin until the baseline
-procedure is executed and verified. The CLAUDE-rev3.md stop-point
+procedure is executed and verified. The CLAUDE-rev4.md stop-point
 (currently lines 71-83) remains in force until Phase 4 transition
 criteria (22.8) are all satisfied. Until then, Claude Code must
 STOP and surface the hazard rather than running migration commands
@@ -3141,7 +3141,7 @@ documentation time. Version mismatch is failure mode F (see 22.5).
 
 **Gate 4 — Linked project verified against known-good project ID.**
 `supabase status --linked` shows the correct project ID, matched
-against the project ID stored persistently (in CLAUDE-rev3.md or a
+against the project ID stored persistently (in CLAUDE-rev4.md or a
 committed config file). A single-character typo in project ID is
 unrecoverable surgery on the wrong database. Visual inspection is
 NOT sufficient — the verification is "matches the stored ID exactly,"
@@ -3277,9 +3277,9 @@ understand both what to do and why this section exists. The section
 serves audit defensibility and protects against similar situations
 recurring.
 
-**22.7: CLAUDE-rev3.md stop-point evolution and password handling.**
+**22.7: CLAUDE-rev4.md stop-point evolution and password handling.**
 
-Current CLAUDE-rev3.md stop-point text (lines 71-83) remains in force
+Current CLAUDE-rev4.md stop-point text (lines 71-83) remains in force
 until Phase 4 transition criteria (22.8) are satisfied. After
 Decision 22 commits but before baseline is executed, the stop-point
 text is updated to cross-reference Decision 22's documented
@@ -3326,15 +3326,15 @@ Phase 4 work can begin once ALL four conditions are satisfied:
    anomalies encountered and resolved. This entry serves as the
    permanent record that baseline was successfully completed.
 
-4. **CLAUDE-rev3.md stop-point updated to RESOLVED.** The stop-point
+4. **CLAUDE-rev4.md stop-point updated to RESOLVED.** The stop-point
    text is updated to "RESOLVED" status with the execution date.
    This is the LAST step in the Phase 4 transition. It signals
    that Phase 4 is unblocked.
 
-The four conditions are ordered. Condition 4 (CLAUDE-rev3.md update) is
+The four conditions are ordered. Condition 4 (CLAUDE-rev4.md update) is
 the LAST step that signals readiness, not parallel to verification.
 Sequence: complete baseline -> verify (Steps 4 and 5) -> session
-handoff entry -> CLAUDE-rev3.md update -> Phase 4 unblocked.
+handoff entry -> CLAUDE-rev4.md update -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four, Phase 4 work proceeds normally and the stop-point becomes
@@ -3439,7 +3439,7 @@ transition gating.
 
 ### Cross-section dependencies
 
-- **CLAUDE-rev3.md (project-level operational rules):** Stop-point text
+- **CLAUDE-rev4.md (project-level operational rules):** Stop-point text
   updated per 22.7. Stop-point itself remains in force until Phase
   4 transition criteria are satisfied per 22.8.
 - **New section "Database Migration Tooling" in architecture-
@@ -3482,7 +3482,7 @@ transition gating.
 **New section in v2's architecture reference:** Database Migration
 Tooling. Section content per 22.6.
 
-**CLAUDE-rev3.md stop-point evolution per 22.7:** Cross-reference
+**CLAUDE-rev4.md stop-point evolution per 22.7:** Cross-reference
 updated to point to Decision 22 and the new Database Migration Tooling
 section. Stop-point itself remains in force.
 
@@ -4146,7 +4146,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Cross-section dependencies
 
-- **Project section** (in v2's architecture-reference-v2-rev3.md):
+- **Project section** (in v2's architecture-reference-v2-rev4.md):
   - trigger_date semantics revision for `contractual_date_manual`
     (23.1) with column comment update
   - Lifecycle subsection needs updates reflecting trigger_date-at-
@@ -4274,7 +4274,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Decision implications for already-committed sections
 
-**Project section (in v2's architecture-reference-v2-rev3.md):**
+**Project section (in v2's architecture-reference-v2-rev4.md):**
 
 - Lifecycle subsection updates per 23.1, 23.2, 23.11
 - New "Migration and import handling" subsection or paragraph per
@@ -4929,4 +4929,193 @@ same failure mode as missing GRANTs on a table.
   - #9 Customer-O&M Authorization document architecture
 
 Section cascade updates land in subsequent commits this session.
+
+---
+
+## Decision 25: ALA Response Overdue, Re-issue, and Response Notification (Cat 3 #5 resolved)
+
+**Decided in Session D (Cat 3 backlog resolution).**
+
+### Context
+
+The ALA System section flags that reminder notifications to a claimant
+who has not signed within some window "might use clock events in a
+future iteration, but no locked source specifies this yet" — Cat 3 #5,
+deferred from Session D's original pairing with #8 due to Decision 24's
+scope growth.
+
+The requirement: an ALA cannot remain open indefinitely. After a
+configurable business-day window with no claimant response, the document
+is flagged as offered-and-unaddressed so the warrantor can act — without
+silently resolving the claimant's decision. Applying Service Report's
+silent-acquiescence pattern (auto-accept on silence) was considered and
+rejected — it directly conflicts with Decision 19.1's atomic
+Accept-and-Signature requirement and 19.7's three-state machine, which
+locks that no auto-resolution occurs.
+
+Drafting surfaced two dependent gaps: business-day math has no existing
+platform mechanism (every prior response window uses calendar days), and
+the design requires the warrantor to be notified when a claimant *does*
+respond, so that non-notification meaningfully signals non-response — no
+such notification currently exists.
+
+### Resolution
+
+**25.1: New clock event type ala_response_overdue.** Follows the
+work_authorization_response_overdue shape (reminder-only, no state
+mutation), not service_report_response_due's shape (auto-resolves).
+Inserted at ALA creation/routing time, with entity_type = 'ala_document',
+entity_id = the document's id, fires_at = creation moment plus the
+tenant's configured business-day window.
+
+**25.2: Window is tenant-configurable, default 7 business days.** Stored
+at tenants.settings.ala_response_overdue_business_days, platform default
+7, validation bounds 3-30 business days — parallel to Decision 21.6's
+canonical response-window convention.
+
+**25.3: Business-day calculation needs a holiday calendar; extends the
+Tenant-Editable Defaults philosophy, not its literal mechanics.**
+Decision 17's principle (platform seeds at provisioning, tenant owns
+forever after, no propagation) fits, but the FK+snapshot lookup-table
+mechanism doesn't — no operational table references a holiday by FK.
+
+    tenant_holidays
+      id            uuid PK
+      tenant_id     uuid NOT NULL FK -> tenants
+                    -- denormalized per Standard RLS Pattern
+      holiday_date  date NOT NULL
+      label         text NOT NULL
+      created_at    timestamptz NOT NULL DEFAULT now()
+      updated_at    timestamptz NOT NULL DEFAULT now()
+
+Platform seeds a default U.S. federal holiday list at provisioning;
+tenants own their list completely afterward, matching 17.A.3 exactly.
+Business-day math (skip Sat/Sun and any tenant_holidays date) runs
+application-layer at the moment fires_at is computed, producing a
+concrete stored timestamp — same convention as every other clock event.
+
+**25.4: New column on ala_documents: overdue_flagged_at.**
+
+    overdue_flagged_at   timestamptz nullable
+                          -- set when ala_response_overdue fires and
+                          --   claimant_decision is still null
+                          -- pure marker: does NOT change
+                          --   claimant_decision or signed_at
+                          -- does NOT unblock the Indistinct
+                          --   blocking gate (per Decision 19.7)
+
+A fourth, orthogonal signal layered on top of the unsigned state — not a
+fourth state in Decision 19.7's machine. unsigned / signed / declined
+remain the complete state set.
+
+**25.5: Dispatcher behavior at firing.** If claimant_decision is still
+null: set overdue_flagged_at = now(), email the claimant explaining the
+window closed with no decision made. No decision is recorded. If
+claimant_decision is non-null, no effect — same convention as
+work_authorization_response_overdue.
+
+**25.6: Warrantor is notified when the claimant explicitly Accepts or
+Declines.** New commitment, required for 25.5 to be meaningful — without
+it the warrantor can't distinguish "responded, nobody told me" from
+"genuinely silent." Synchronous Server Action side effect at the moment
+claimant_decision commits, parallel to the assignee notification in
+Decision 23.3 step 4. No new schema column needed.
+
+**25.7: Re-issue is warrantor-invoked**, mirroring 19.9's decline-recant
+re-issue: invoked on a row where overdue_flagged_at IS NOT NULL AND
+claimant_decision IS NULL; writes an audit entry; resets
+overdue_flagged_at = NULL; regenerates claimant_token and
+claimant_token_expires_at; resends the link; inserts a fresh
+ala_response_overdue event.
+
+**25.8: No forced auto-terminal state.** Unlike the decline-recant
+window, overdue-and-flagged doesn't auto-terminate — it persists until
+the warrantor re-issues (25.7) or manually escalates through the
+existing Escalated/Denied pathway. Same explicit-action principle as
+Decision 19: silence never becomes a decision.
+
+### Schema additions
+
+New table tenant_holidays; new column ala_documents.overdue_flagged_at;
+new clock_events.entity_type value ala_document; new event_type value
+ala_response_overdue (eighth, after Decision 9's four plus
+service_report_response_due, work_authorization_response_overdue, and
+ala_decline_window_expired).
+
+### Decision implications for already-committed sections
+
+ALA System section — "No clock events" bullet revised; new "Response
+window, overdue flag, and re-issue" subsection added. Clock Event
+Infrastructure section — entity_type enum comment and event type list
+both updated (also catching pre-existing drift where three prior
+decisions' event types were never cascaded back into this list).
+
+### Cat 3 backlog impact
+
+Item #5 resolved. Remaining: TWO items — #1 (claim eligibility), #9
+(Customer-O&M Authorization).
+
+---
+
+## Decision 26: ALA Revise-and-Resend
+
+**Decided in Session D (surfaced during Decision 25 drafting).**
+
+### Context
+
+Decision 19 explicitly deferred this: a future Decision could add a
+child table for ALA revisions if operational pressure surfaced. It just
+did — a need to update an ALA's content (new findings, revised scope)
+without creating a second ala_documents row, which the locked
+UNIQUE (claim_id) constraint forbids and continues to forbid. Distinct
+from Decision 25: re-issue resends the same content after non-response;
+revise-and-resend changes the content because circumstances changed.
+
+### Resolution
+
+**26.1: New child table ala_document_revisions**, parallel to
+work_authorization_revisions:
+
+    ala_document_revisions
+      id                    uuid PK
+      tenant_id             uuid NOT NULL FK -> tenants
+                            -- denormalized per Standard RLS Pattern
+      ala_document_id       uuid NOT NULL FK -> ala_documents
+      revised_by_user_id    uuid NOT NULL FK -> public.users(id)
+      revision_reason       jsonb NOT NULL
+                            -- ProseMirror-compatible JSON
+      field_changes         jsonb NOT NULL
+                            -- before/after record; shape is Phase 3
+      revised_at            timestamptz NOT NULL DEFAULT now()
+
+**26.2: ala_documents.UNIQUE(claim_id) is unchanged.** Not reopened. One
+row per claim, always; revisions are child rows.
+
+**26.3: Revise action updates the row in place.** Verifies revisability
+(26.4); writes an ala_document_revisions row with prior state; updates
+content_snapshot/markup_percent_snapshot; clears overdue_flagged_at if
+set; regenerates token; resends link; if declined, resets via the same
+shape as 19.9; inserts a fresh ala_response_overdue event (window
+restarts).
+
+**26.4: Revising a signed ALA is blocked at v1.** Once signed_at IS NOT
+NULL, the gate is already cleared on the strength of that signature —
+revising terms already accepted is a materially different problem.
+Mirrors the O&M provider blocking convention (20.6/20.7): block now,
+flag as future scope (would likely need re-signature) if pressure
+surfaces.
+
+**26.5: Resolves Decision 19's deferred revise-and-resend question.**
+Explicit cross-reference for future readers.
+
+### Schema additions
+
+New table ala_document_revisions.
+
+### Decision implications for already-committed sections
+
+ALA System section — new "Revise-and-resend" subsection added.
+
+Not a numbered Cat 3 item — resolves a Decision 19 deferral, surfaced by
+operational pressure.
 
