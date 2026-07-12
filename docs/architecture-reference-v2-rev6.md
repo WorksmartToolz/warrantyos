@@ -1228,7 +1228,7 @@ six pre-procedure verification gates per Decision 22.3, the drift verification
 gate per Decision 22.9, the six named failure modes per Decision 22.5, the
 Mode C gating per Decision 22.10, and the four Phase 4 transition criteria per
 Decision 22.8 are architecturally locked. Procedure execution against the
-hosted database is Phase 4 work, gated by the CLAUDE-rev5.md stop-point until all
+hosted database is Phase 4 work, gated by the CLAUDE-rev6.md stop-point until all
 four transition criteria in Decision 22.8 are satisfied. This section is the
 authoritative reference for the procedure and for ongoing migration tooling
 mechanics across the platform lifecycle.)
@@ -1245,7 +1245,7 @@ schema mechanics; Data Migration Tooling covers customer data mechanics.
 Both are load-bearing for the platform, and they are architecturally
 independent.
 
-Decision 22 (session-handoffs/5e-bridge-phase3-decisions-log-rev5.md) is the
+Decision 22 (session-handoffs/5e-bridge-phase3-decisions-log-rev6.md) is the
 architectural authority for the material in this section. This section
 documents Decision 22's ten commitments in reference-usable form and adds
 the ongoing operational mechanics that Decision 22 flagged as belonging in
@@ -1282,7 +1282,7 @@ the CLI will attempt to apply migrations 000 through the newest one,
 detecting that migration 000 has not been applied per migration_history,
 and attempting to CREATE TABLE tenants (which already exists) — producing
 either an error or, worse, silent corruption depending on the specific
-migration content. The CLAUDE-rev5.md stop-point (lines 71-83 as of this
+migration content. The CLAUDE-rev6.md stop-point (lines 71-83 as of this
 writing) documents this hazard and instructs Claude Code to STOP before
 running any command that could trigger this failure.
 
@@ -1295,7 +1295,7 @@ completes, subsequent supabase db push commands only attempt to apply
 migrations 005 and later.
 
 This is a one-time procedure. Once baseline is complete and Phase 4
-transition criteria per Decision 22.8 are all satisfied, the CLAUDE-rev5.md
+transition criteria per Decision 22.8 are all satisfied, the CLAUDE-rev6.md
 stop-point is updated to RESOLVED and Phase 4 work proceeds normally.
 The hazard becomes historical context preserved in this section.
 
@@ -1441,7 +1441,7 @@ authoritative source for behavioral changes across versions. If the
 locally installed CLI version differs from the pinned version, STOP —
 this is failure mode F (CLI version mismatch, see below).
 
-The pinned version is captured either in CLAUDE-rev5.md alongside the
+The pinned version is captured either in CLAUDE-rev6.md alongside the
 stop-point or in a repo-committed config file. Visual inspection of
 "looks like the current version" is not sufficient; the check is exact
 version-string match.
@@ -1449,7 +1449,7 @@ version-string match.
 **Gate 4 — Linked project verified against known-good project ID.**
 
 `supabase status --linked` shows the correct project ID. The correct ID
-is stored persistently — in CLAUDE-rev5.md or a committed config file — and
+is stored persistently — in CLAUDE-rev6.md or a committed config file — and
 the verification compares the returned ID against the stored ID exactly.
 
 Visual inspection of "this looks like our project" is NOT sufficient.
@@ -1461,9 +1461,9 @@ Gate 4 is much cheaper than recovery via Mode C.
 
 The stored project ID lives in a location that (a) is committed to the
 repo (so it's version-controlled and auditable), and (b) is protected
-by the same security posture as CLAUDE-rev5.md. A dedicated config file
+by the same security posture as CLAUDE-rev6.md. A dedicated config file
 under docs/operational/ is one appropriate location; embedding the ID
-in CLAUDE-rev5.md alongside the stop-point is another. The specific location
+in CLAUDE-rev6.md alongside the stop-point is another. The specific location
 is an operator preference; the architectural commitment is that the ID
 is stored persistently rather than remembered.
 
@@ -1840,9 +1840,9 @@ baseline was successfully completed. Future operators reviewing the
 project's history can find this entry and understand what happened,
 when, and by whom.
 
-**Condition 4 — CLAUDE-rev5.md stop-point updated to RESOLVED.**
+**Condition 4 — CLAUDE-rev6.md stop-point updated to RESOLVED.**
 
-The stop-point text in CLAUDE-rev5.md (currently lines 71-83 as of this
+The stop-point text in CLAUDE-rev6.md (currently lines 71-83 as of this
 writing) is updated to RESOLVED status with the execution date. This
 is the LAST step in the Phase 4 transition. It signals that Phase 4
 is unblocked.
@@ -1850,7 +1850,7 @@ is unblocked.
 Condition 4 is deliberately last. It is not parallel to verification;
 it is the readiness signal that follows successful verification.
 Sequence: complete baseline (Conditions 1-2) -> session-handoff entry
-(Condition 3) -> CLAUDE-rev5.md update (Condition 4) -> Phase 4 unblocked.
+(Condition 3) -> CLAUDE-rev6.md update (Condition 4) -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four are met, Phase 4 work proceeds normally and the stop-point
@@ -1966,16 +1966,16 @@ record.
 
 **The stop-point becomes historical context.**
 
-Post-Phase-4-transition, the CLAUDE-rev5.md stop-point at lines 71-83
+Post-Phase-4-transition, the CLAUDE-rev6.md stop-point at lines 71-83
 (as of this writing; the specific lines will change with future
-CLAUDE-rev5.md edits) is updated to RESOLVED status. The text is preserved
-in CLAUDE-rev5.md as historical context rather than being deleted. Future
-operators reading CLAUDE-rev5.md can find both the historical hazard and
+CLAUDE-rev6.md edits) is updated to RESOLVED status. The text is preserved
+in CLAUDE-rev6.md as historical context rather than being deleted. Future
+operators reading CLAUDE-rev6.md can find both the historical hazard and
 the resolution reference.
 
-### CLAUDE-rev5.md stop-point evolution
+### CLAUDE-rev6.md stop-point evolution
 
-Per Decision 22.7, the CLAUDE-rev5.md stop-point evolves through three
+Per Decision 22.7, the CLAUDE-rev6.md stop-point evolves through three
 distinct states across the platform lifecycle:
 
 **State 1 — In force (current state as of this section).**
@@ -2011,7 +2011,7 @@ date. Suggested resolved-state text:
     Migration Tooling section for the historical hazard context
     and the procedure that resolved it.
 
-The RESOLVED state is preserved in CLAUDE-rev5.md indefinitely. It serves
+The RESOLVED state is preserved in CLAUDE-rev6.md indefinitely. It serves
 audit defensibility — future contributors can find both the historical
 hazard and its resolution without needing to reconstruct either from
 git history.
@@ -2057,7 +2057,7 @@ prompt is the safer default and is the architectural commitment.
 
 ### Cross-references
 
-- Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log-rev5.md)
+- Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log-rev6.md)
   is the architectural authority for this section. Decision 22's ten
   commitments (22.1 through 22.10) are documented here in
   reference-usable form.
@@ -2067,7 +2067,7 @@ prompt is the safer default and is the architectural commitment.
   convention that Database Migration Tooling operates within. Step 5
   of the baseline procedure and the ongoing schema.sql regeneration
   mechanic both depend on Decision 10's mechanism.
-- CLAUDE-rev5.md (lines 71-83 as of this writing) contains the stop-point
+- CLAUDE-rev6.md (lines 71-83 as of this writing) contains the stop-point
   that governs Claude Code's behavior during the pre-baseline period.
   The stop-point cross-references this section and Decision 22.
 - Data Migration Tooling section (in v2, elsewhere) covers the
@@ -4227,12 +4227,12 @@ agent for warranty matters, the binding-commitment nature of an ALA
 (the customer accepting financial responsibility for investigation if
 the defect falls outside warranty scope) requires the Customer-O&M
 Authorization document as a precondition. That document is deferred
-to Cat 3 #9 (Customer-O&M Authorization document architecture). Until
-Cat 3 #9 lands, the ALA Server Action verifies the actor's contact_type
-and BLOCKS acceptance attempts where actor contact_type IN
-('om_provider', 'om_provider_contact') with a "O&M Provider binding-
-commitment agency is not yet supported" error. Tenants who require
-O&M Provider ALA acceptance must wait for Cat 3 #9 to land.
+to Cat 3 #9 (Customer-O&M Authorization document architecture). Per
+Decision 28, the ALA Server Action checks for a signed
+om_authorization_documents row (event_type = 'ala') before allowing an
+actor with contact_type IN ('om_provider', 'om_provider_contact') to
+accept. If no signed row exists, the action is blocked with an
+"authorization required" error and a link to initiate signing.
 
 ### Response window, overdue flag, and re-issue
 
@@ -4960,15 +4960,15 @@ customer accepting or disputing the warrantor's assertion that the
 repair is complete, which closes or contests the claim) requires the
 Customer-O&M Authorization document as a precondition. That document
 is deferred to Cat 3 #9 (Customer-O&M Authorization document
-architecture). Until Cat 3 #9 lands, the Service Report Server Action
-verifies the actor's contact_type and BLOCKS explicit acceptance and
-dispute submissions where actor contact_type IN ('om_provider',
-'om_provider_contact') with a "O&M Provider binding-commitment agency
-is not yet supported" error. The silence-acceptance path
-(Assumption of Acquiesce) operates independently of actor identity —
-it fires on the clock event regardless of who could have responded.
-Tenants who require O&M Provider Service Report review must wait for
-Cat 3 #9 to land.
+architecture). Per Decision 28, the Service Report Server Action
+checks for a signed om_authorization_documents row (event_type =
+'service_report') before allowing an actor with contact_type IN
+('om_provider', 'om_provider_contact') to submit an explicit acceptance
+or dispute. If no signed row exists, the action is blocked with an
+"authorization required" error and a link to initiate signing. The
+silence-acceptance path (Assumption of Acquiesce) operates
+independently of actor identity — it fires on the clock event
+regardless of who could have responded.
 
 ### The customer review window: a new clock event type
 
@@ -5803,13 +5803,13 @@ as their authorized agent for warranty matters, the binding-commitment
 nature of Work Authorization approval (the customer authorizing
 specific on-site activity at their site) requires the Customer-O&M
 Authorization document as a precondition. That document is deferred
-to Cat 3 #9 (Customer-O&M Authorization document architecture). Until
-Cat 3 #9 lands, the Work Authorization Server Action verifies the
-actor's contact_type and BLOCKS approval attempts where actor
-contact_type IN ('om_provider', 'om_provider_contact') with a
-"O&M Provider binding-commitment agency is not yet supported" error.
-Tenants who require O&M Provider Work Authorization approval must
-wait for Cat 3 #9 to land.
+to Cat 3 #9 (Customer-O&M Authorization document architecture). Per
+Decision 28, the Work Authorization Server Action checks for a signed
+om_authorization_documents row (event_type = 'work_authorization')
+before allowing an actor with contact_type IN ('om_provider',
+'om_provider_contact') to approve. If no signed row exists, the action
+is blocked with an "authorization required" error and a link to
+initiate signing.
 
 ### State machine on status
 

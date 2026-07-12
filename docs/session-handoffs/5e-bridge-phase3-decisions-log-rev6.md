@@ -2442,6 +2442,12 @@ to ALA template configuration.
 **20.8: Cat 3 #9 surfaced — Customer-O&M Authorization document
 architecture (expanded scope).**
 
+> **Superseded by Decision 28** (Session F). The standing-document,
+voided/superseded model described below was replaced by a per-event
+authorization model. This passage is preserved as historical record
+of the original scope; see Decision 28 for the architecture that was
+actually built.
+
 A new Cat 3 backlog item is added: #9 Customer-O&M Authorization
 document architecture. Scope parallel to ALA System (Decision 19)
 PLUS the additional mechanics surfaced during Decision 20:
@@ -2997,7 +3003,7 @@ in the repo. Phase 4 work that involves applying migrations to the
 hosted DB cannot begin until the remote migration history is
 baselined.
 
-CLAUDE-rev5.md currently documents this as a stop-point (lines 71-83):
+CLAUDE-rev6.md currently documents this as a stop-point (lines 71-83):
 do NOT run `supabase db push`, `supabase db remote commit`,
 `supabase migration up --linked`, or any command that applies local
 migrations to the hosted/remote/production database until the remote
@@ -3039,7 +3045,7 @@ Ten architectural commitments.
 **22.1: Phase 4 transition gate.**
 
 Phase 4 work involving migrations cannot begin until the baseline
-procedure is executed and verified. The CLAUDE-rev5.md stop-point
+procedure is executed and verified. The CLAUDE-rev6.md stop-point
 (currently lines 71-83) remains in force until Phase 4 transition
 criteria (22.8) are all satisfied. Until then, Claude Code must
 STOP and surface the hazard rather than running migration commands
@@ -3141,7 +3147,7 @@ documentation time. Version mismatch is failure mode F (see 22.5).
 
 **Gate 4 — Linked project verified against known-good project ID.**
 `supabase status --linked` shows the correct project ID, matched
-against the project ID stored persistently (in CLAUDE-rev5.md or a
+against the project ID stored persistently (in CLAUDE-rev6.md or a
 committed config file). A single-character typo in project ID is
 unrecoverable surgery on the wrong database. Visual inspection is
 NOT sufficient — the verification is "matches the stored ID exactly,"
@@ -3277,9 +3283,9 @@ understand both what to do and why this section exists. The section
 serves audit defensibility and protects against similar situations
 recurring.
 
-**22.7: CLAUDE-rev5.md stop-point evolution and password handling.**
+**22.7: CLAUDE-rev6.md stop-point evolution and password handling.**
 
-Current CLAUDE-rev5.md stop-point text (lines 71-83) remains in force
+Current CLAUDE-rev6.md stop-point text (lines 71-83) remains in force
 until Phase 4 transition criteria (22.8) are satisfied. After
 Decision 22 commits but before baseline is executed, the stop-point
 text is updated to cross-reference Decision 22's documented
@@ -3326,15 +3332,15 @@ Phase 4 work can begin once ALL four conditions are satisfied:
    anomalies encountered and resolved. This entry serves as the
    permanent record that baseline was successfully completed.
 
-4. **CLAUDE-rev5.md stop-point updated to RESOLVED.** The stop-point
+4. **CLAUDE-rev6.md stop-point updated to RESOLVED.** The stop-point
    text is updated to "RESOLVED" status with the execution date.
    This is the LAST step in the Phase 4 transition. It signals
    that Phase 4 is unblocked.
 
-The four conditions are ordered. Condition 4 (CLAUDE-rev5.md update) is
+The four conditions are ordered. Condition 4 (CLAUDE-rev6.md update) is
 the LAST step that signals readiness, not parallel to verification.
 Sequence: complete baseline -> verify (Steps 4 and 5) -> session
-handoff entry -> CLAUDE-rev5.md update -> Phase 4 unblocked.
+handoff entry -> CLAUDE-rev6.md update -> Phase 4 unblocked.
 
 Before all four conditions are met, Phase 4 work is BLOCKED. After
 all four, Phase 4 work proceeds normally and the stop-point becomes
@@ -3439,7 +3445,7 @@ transition gating.
 
 ### Cross-section dependencies
 
-- **CLAUDE-rev5.md (project-level operational rules):** Stop-point text
+- **CLAUDE-rev6.md (project-level operational rules):** Stop-point text
   updated per 22.7. Stop-point itself remains in force until Phase
   4 transition criteria are satisfied per 22.8.
 - **New section "Database Migration Tooling" in architecture-
@@ -3482,7 +3488,7 @@ transition gating.
 **New section in v2's architecture reference:** Database Migration
 Tooling. Section content per 22.6.
 
-**CLAUDE-rev5.md stop-point evolution per 22.7:** Cross-reference
+**CLAUDE-rev6.md stop-point evolution per 22.7:** Cross-reference
 updated to point to Decision 22 and the new Database Migration Tooling
 section. Stop-point itself remains in force.
 
@@ -4146,7 +4152,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Cross-section dependencies
 
-- **Project section** (in v2's architecture-reference-v2-rev5.md):
+- **Project section** (in v2's architecture-reference-v2-rev6.md):
   - trigger_date semantics revision for `contractual_date_manual`
     (23.1) with column comment update
   - Lifecycle subsection needs updates reflecting trigger_date-at-
@@ -4274,7 +4280,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Decision implications for already-committed sections
 
-**Project section (in v2's architecture-reference-v2-rev5.md):**
+**Project section (in v2's architecture-reference-v2-rev6.md):**
 
 - Lifecycle subsection updates per 23.1, 23.2, 23.11
 - New "Migration and import handling" subsection or paragraph per
@@ -5238,3 +5244,145 @@ warranty_registration added.
 Item #1 resolved. Remaining: ONE item — #9 (Customer-O&M Authorization
 document architecture).
 
+---
+
+## Decision 28: Customer-O&M Authorization — Per-Event Architecture (Cat 3 #9 Resolved)
+
+**Decided in Session F.**
+
+### Context
+
+Cat 3 #9 was scoped in Decision 20.8 as a standing, customer-level authorization document parallel to ALA's shape — signed once, voided/superseded on O&M Provider change, governing agency indefinitely until revoked. During Session F scoping, Andre corrected this framing: the signed authorization is not specific to whichever company currently holds the O&M Provider role — it authorizes the role, on behalf of the customer, per specific binding-commitment event (ALA acceptance, Work Authorization approval, Service Report review). Authorization is sign-once-per-event and closes when that event closes; it does not persist across subsequent events, even for the same customer and same O&M relationship on the same day.
+
+This is a substantive scope departure from 20.8, not a refinement of it. The original four-state model (unsigned/signed/voided/superseded) and the standing-document assumption are superseded by this Decision.
+
+### Question
+
+What is the Customer-O&M Authorization architecture, given per-event (not standing) scope, and how does it integrate with the ALA, Work Authorization, and Service Report Server Actions without altering any of their existing locked trigger conditions?
+
+### Resolution
+
+**28.1: New standalone table — om_authorization_documents — not columns on existing tables.**
+
+The three tables this authorization gates — ala_documents (Decision 19), work_authorization_documents (Decision 11), service_reports — receive zero schema changes. om_authorization_documents points outward at whichever of the three rows it authorizes, using the same polymorphic event_type + event_reference_id shape Work Authorization already uses for Work Plans/Inspections. This was the deliberate design choice to guarantee the three already-locked trigger conditions (Indistinct outcome creates ALA; warrantor-send creates Work Authorization; reviewer-acceptance creates Service Report review link) remain completely untouched.
+
+**28.2: One authorization per event, structurally enforced. No sharing, no reuse.**
+
+event_type ('ala' | 'work_authorization' | 'service_report') + event_reference_id together identify exactly one parent row. A customer with three simultaneously open claims requiring O&M binding-commitment action gets three separate signed rows — same customer, same O&M Provider, same day, no sharing.
+
+**28.3: Reopened events always create a new row. No reset-and-reuse.**
+
+A denied claim reopening, an ALA revise-and-resend, or a Work Authorization revision-and-resend each generate a brand-new om_authorization_documents row with a new id, not a status reset on the prior row. The prior row's history is preserved unmodified.
+
+**28.4: linked_om_provider_id is captured at row creation, not derived live.**
+
+This single field carries the entire mid-claim-handoff and audit-defensibility burden that Decision 20.8 had assigned to a separate voiding mechanism and a separate audit-trail table. Because it's captured once per row at creation:
+- A signed row remains historically accurate proof of who was authorized for that specific event, permanently — satisfying 20.7c's binding-past-decisions requirement with no additional snapshot mechanism needed.
+- An unsigned row, if the customer's O&M Provider changes before signature, is rerouted per the handoff rule (28.6) rather than voided.
+
+**28.5: Four-value status enum — simpler than 20.8's four states, different states.**
+
+    status   text NOT NULL DEFAULT 'unsigned'
+             -- 'unsigned' | 'signed' | 'closed' | 'stale'
+
+- unsigned — created, tokenized link sent, awaiting signature.
+- signed — customer signed; permanent audit record authorizing the O&M Provider named in linked_om_provider_id to act on this specific event.
+- closed — mirrors the parent event's own terminal state (ALA reaches terminal, Work Authorization approved/withdrawn, Service Report reviewed/closed). This row does not track an independent lifecycle past its parent's.
+- stale — was unsigned when the linked O&M Provider changed. Token invalidated. A new row is created for the new provider (per 28.6). Terminal, audit-only.
+
+No voided value exists. Voiding as a concept is eliminated by the per-event model: a provider switch either reroutes an unsigned row (→ stale + new row) or does nothing to a signed one (stays valid under 28.4). No superseded value exists for the same reason — reopening always produces a new row under 28.3, so there is nothing to supersede in place.
+
+**28.6: Mid-claim O&M Provider handoff — locked rule.**
+
+Authority always follows whoever the current linked O&M Provider is — no per-claim or per-event authority tracking beyond what linked_om_provider_id already captures on each row. The instant a customer switches providers:
+- The outgoing provider loses all forward authority immediately, on every open event.
+- The incoming provider gains full authority immediately, including on events already in flight.
+- Any unsigned om_authorization_documents row tied to the outgoing provider transitions to stale; its customer_token is invalidated; a new unsigned row is created for the same event_type/event_reference_id, with linked_om_provider_id set to the incoming provider, and a fresh tokenized link is issued.
+- signed rows are never touched by a provider switch — they remain valid proof of what was authorized at the time, per 28.4.
+
+**28.7: Permission-check swap in the three existing Server Actions — logic changes, trigger conditions do not.**
+
+Decisions 19, 11, and the Service Report Submission section each currently contain a hard block:
+
+    IF actor.contact_type IN ('om_provider','om_provider_contact')
+      -> BLOCK, "O&M Provider binding-commitment agency is not yet supported"
+
+This Decision replaces that block's condition — not its location, not the surrounding trigger logic — with:
+
+    IF actor.contact_type IN ('om_provider','om_provider_contact')
+      -> check for a 'signed' om_authorization_documents row where
+         event_type/event_reference_id match this event
+         -> IF found, proceed
+         -> IF not found, BLOCK with "authorization required" and a
+            link to initiate signing
+
+The moment each of the three Server Actions fires (Indistinct outcome, warrantor-send, reviewer-acceptance) is unchanged. Only the O&M-actor permission check inside each action changes, and only in the way those three sections already flagged as pending Cat 3 #9. Confirmed via Claude Code audit (Session F) against the live repo: no code yet exists for any of the three Server Actions; the block condition exists only as architectural prose at docs/architecture-reference-v2-rev6.md:4230-4235 (ALA), :5806-5812 (Work Authorization), :4963-4967 (Service Report) — all three quotes identical in shape, confirmed consistent, no divergence found.
+
+**28.8: Signature mechanism reused, not reinvented.**
+
+Per 20.8's original guidance (still valid — this part of the scope didn't shift), signature capture reuses Decision 19's in_platform_widget with typed-name fallback for accessibility. No new signing mechanism is introduced.
+
+**28.9: Tokenized signing flow — seventh canonical use of the Stateless Tokenized Interaction Pattern.**
+
+customer_token / customer_token_expires_at on om_authorization_documents follow the pattern's "shape to copy, not shared store" rule, per-row, matching ala_documents.claimant_token and the pattern's five other existing canonical uses plus ALA (six). This Decision adds the seventh.
+
+**28.10: No audit-trail table for linked_om_provider_id changes on the customer row.**
+
+Decision 20.8 flagged a separate audit mechanism as needed for this. It is no longer required: the per-event om_authorization_documents.linked_om_provider_id field, captured once per row across every event a customer ever has, collectively is the audit trail — a full reconstructable history of who was authorized, for what, and when, without a dedicated change-log table.
+
+### Schema
+
+    om_authorization_documents
+      id                          uuid PK
+      tenant_id                   uuid NOT NULL FK -> tenants
+      claim_id                    uuid NOT NULL FK -> claims
+      customer_id                 uuid NOT NULL FK -> contacts
+                                   -- contact_type = 'customer' row
+      linked_om_provider_id       uuid NOT NULL FK -> contacts
+      event_type                  text NOT NULL
+                                   -- 'ala' | 'work_authorization' | 'service_report'
+      event_reference_id          uuid NOT NULL
+                                   -- polymorphic: points to ala_documents /
+                                   --   work_authorization_documents / service_reports
+      template_id                 uuid NOT NULL FK -> om_authorization_templates
+      content_snapshot            jsonb NOT NULL
+      status                      text NOT NULL DEFAULT 'unsigned'
+                                   -- 'unsigned' | 'signed' | 'closed' | 'stale'
+      signer_name_typed           text nullable
+      signed_at                   timestamptz nullable
+      customer_token              text nullable
+      customer_token_expires_at   timestamptz nullable
+      created_at                  timestamptz NOT NULL DEFAULT now()
+      updated_at                  timestamptz NOT NULL DEFAULT now()
+
+    om_authorization_templates
+      id                          uuid PK
+      tenant_id                   uuid NOT NULL FK -> tenants
+      name                        text NOT NULL
+      acknowledgment_text         jsonb NOT NULL
+                                   -- captures 20.7a-d's four commitments:
+                                   --   agent authorization, no-notification
+                                   --   acknowledgment, binding-on-customer
+                                   --   acknowledgment, ultimate-responsibility
+                                   --   acknowledgment
+      is_default                  boolean NOT NULL DEFAULT false
+      created_at                  timestamptz NOT NULL DEFAULT now()
+
+### Cross-entity dependencies
+
+- **ALA System (Decision 19):** signature-capture mechanism reused per 28.8. ALA Server Action's O&M block updated per 28.7. No change to ala_documents schema, no change to Indistinct-outcome trigger.
+- **Customer Work Authorization (Decision 11):** same permission-check swap per 28.7. No change to work_authorization_documents schema, no change to send-triggers-creation logic. event_type + event_reference_id pattern directly reused from this section's existing shape (confirmed via Claude Code audit, Session F: two-column shape, app-layer-only FK, no divergence).
+- **Service Report Submission:** same permission-check swap per 28.7. No change to service_reports schema, no change to reviewer-acceptance trigger. The silence-acceptance (Assumption of Acquiesce) path is explicitly unaffected — it already fires regardless of actor identity and has no O&M-actor block to begin with.
+- **Decision 20 (20.3, 20.7, 20.8):** 20.3's single-FK linked_om_provider_id model on the customer row is unchanged and is exactly what 28.6's handoff rule reads from. 20.7c's binding-past-decisions principle is satisfied by 28.4 rather than by a separate mechanism. 20.8's original scope (voiding, superseding, standing-document audit trail) is superseded by this Decision.
+
+### Deviations from Decision 20.8's original scope — explicitly flagged
+
+- Standing per-customer authorization → per-event authorization. Not a refinement; a different model.
+- Four-state machine (unsigned/signed/voided/superseded) → four different states (unsigned/signed/closed/stale). Names overlap partially with the original scope note but the states themselves and their meaning do not.
+- Separate voiding mechanic → eliminated, replaced by stale-and-reissue on unsigned rows only.
+- Separate linked_om_provider_id audit-trail table → eliminated, replaced by the per-event FK capture serving as the audit trail itself (28.10).
+- Net result: this Decision's scope is smaller and simpler than 20.8 anticipated, not larger.
+
+### Cat 3 backlog impact
+
+Item #9 resolved. Cat 3 backlog is now fully resolved — zero items remaining.
