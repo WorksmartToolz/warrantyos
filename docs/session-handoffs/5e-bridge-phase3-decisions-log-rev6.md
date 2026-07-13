@@ -4152,7 +4152,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Cross-section dependencies
 
-- **Project section** (in v2's architecture-reference-v2-rev6.md):
+- **Project section** (in the architecture reference, docs/architecture-reference.md):
   - trigger_date semantics revision for `contractual_date_manual`
     (23.1) with column comment update
   - Lifecycle subsection needs updates reflecting trigger_date-at-
@@ -4280,7 +4280,7 @@ Phase 4 implementers do NOT need to invent a backfill script.
 
 ### Decision implications for already-committed sections
 
-**Project section (in v2's architecture-reference-v2-rev6.md):**
+**Project section (in the architecture reference, docs/architecture-reference.md):**
 
 - Lifecycle subsection updates per 23.1, 23.2, 23.11
 - New "Migration and import handling" subsection or paragraph per
@@ -5316,7 +5316,7 @@ This Decision replaces that block's condition — not its location, not the surr
          -> IF not found, BLOCK with "authorization required" and a
             link to initiate signing
 
-The moment each of the three Server Actions fires (Indistinct outcome, warrantor-send, reviewer-acceptance) is unchanged. Only the O&M-actor permission check inside each action changes, and only in the way those three sections already flagged as pending Cat 3 #9. Confirmed via Claude Code audit (Session F) against the live repo: no code yet exists for any of the three Server Actions; the block condition exists only as architectural prose at docs/architecture-reference-v2-rev6.md:4230-4235 (ALA), :5806-5812 (Work Authorization), :4963-4967 (Service Report) — all three quotes identical in shape, confirmed consistent, no divergence found.
+The moment each of the three Server Actions fires (Indistinct outcome, warrantor-send, reviewer-acceptance) is unchanged. Only the O&M-actor permission check inside each action changes, and only in the way those three sections already flagged as pending Cat 3 #9. Confirmed via Claude Code audit (Session F) against the live repo: no code yet exists for any of the three Server Actions; the block condition exists only as architectural prose at docs/architecture-reference.md:4230-4235 (ALA), :5806-5812 (Work Authorization), :4963-4967 (Service Report) — all three quotes identical in shape, confirmed consistent, no divergence found.
 
 **28.8: Signature mechanism reused, not reinvented.**
 
