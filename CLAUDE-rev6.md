@@ -61,6 +61,28 @@ met), do not re-verify in the current session unless the user
 asks for re-verification or the state plausibly changed.
 Established state is captured in session handoff documents.
 
+## Doc-control discipline
+**Historical text is frozen; never edit it in place.** Prose in
+`docs/session-handoffs/` and in the decisions log that testifies
+to a past belief, decision, or state must not be rewritten when
+later superseded. Editing it falsifies the record. To supersede
+a past decision, add a forward-pointing note rather than changing
+the original text. (Convention 7.)
+**Location citations are pointers, not testimony; update them
+when their target moves.** Filenames, paths, and line-number
+ranges whose sole job is to direct a reader to current content
+are updated when the cited file is renamed, moved, or shifted.
+Freezing a pointer at a dead location breaks the reference rather
+than preserving history. The test: does editing this text lie
+about the past (freeze it, Convention 7) or merely fix a pointer
+to live content (update it, this convention)? (Convention 7a,
+established 2026-07-12 during the v2-to-canonical promotion.)
+**Re-verify line-number citations after any edit that shifts
+line counts.** When an edit adds or removes lines in a file that
+other documents cite by line number, confirm each citing range
+still lands on the content it claims. A pure rename does not
+shift line numbers; a content edit can. (Convention 8.)
+
 ## Stop-point discipline
 
 **Surface prerequisite problems, do not work around them.** If a
