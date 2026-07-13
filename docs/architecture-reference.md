@@ -1,6 +1,6 @@
 **Last updated:** 995ba83 2026-07-12
 
-# WarrantyOS — Architectural Reference (v2, Prototype Phase)
+# WarrantyOS — Architectural Reference
 
 > **Status:** Canonical architecture reference (promoted 2026-07-12). This
 > document supersedes the Phase 2 baseline, archived at
@@ -9,13 +9,44 @@
 > implementation status: **Implemented** (exists in code today), **Designed**
 > (architecturally locked, not yet built), or **Deferred** (planned, not yet
 > designed in detail).
->
-> **Section ordering note:** v1's identity sections — "What This Platform Is,"
-> the Core Operational Philosophy principles, and Core Identifiers — precede
-> this content in the final document. They are carried forward from v1 and
-> integrated in a later drafting pass. v2 currently opens with foundational
-> patterns (Tier 1) because those are drafted first per the Phase 3 dependency
-> order; the anchor sections will be slotted ahead of them before the swap.
+
+---
+
+## What This Platform Is
+
+WarrantyOS is a warranty governance platform for mid-sized EPC warranty operations in solar/renewables. The platform serves warranty operations teams managing warranty obligations on solar construction projects. Its primary value is operational integrity, defensibility, and structured warranty governance — not customer service optimization.
+
+## Core Operational Philosophy
+
+The platform operates per the following named principles:
+
+**Obligation-Not-Assistance:** The warrantor's role is to honor contractual obligations, not to provide service beyond those obligations. The platform supports honest evaluation of obligations and does not pressure toward customer satisfaction at the expense of structural integrity.
+
+**Burden of Proof:** The claimant bears responsibility for demonstrating the basis of warranty claims. The warrantor evaluates evidence; the warrantor does not investigate claims at warranty's expense outside specific structural contexts.
+
+**Methodological Privacy:** Customer-facing communications include operational coordination content. Internal cost details, reviewer notes, and warranty governance reasoning are not customer-visible. The platform structurally separates customer-facing and internal views of the same records.
+
+**Structural Integrity:** The platform's architecture enforces methodology consistency. Reviewers cannot bypass gates, skip required reasoning capture, or extend authority beyond their tier. Structure protects the platform's defensibility.
+
+**Defensibility:** Every consequential decision generates audit-quality reasoning. The audit trail produces externally-usable evidence for regulatory inquiry, contract dispute, or litigation as a byproduct of normal operations.
+
+**System-Managed Clock:** All deadlines, response windows, and time-bound state transitions are managed by the platform, not by reviewers. Manual clock manipulation is structurally prevented.
+
+**Operational Transparency:** Significant claim events are visible to the warranty team broadly via shared dashboards, not solely to the assigned reviewer. Accountability requires visibility.
+
+**Single Reviewer Continuity:** A claim is owned by one reviewer from pickup through outcome. Reassignment is a discrete authority-governed event with audit capture.
+
+**Data Portability:** Warrantor organizations can export their data at any time in structured formats. The platform does not lock data in.
+
+**Stateless Customer Interaction:** Customers do not have platform accounts or logins. All customer engagement is via tokenized email links to focused interfaces. Each customer interaction is structurally independent.
+
+## Core Identifiers
+
+**WarrantyID:** The platform's master operational anchor. Format default `WID-YYYY-NNNNNN` (per-org configurable). Every warranty agreement on a project has a unique WarrantyID. Used internally for warranty agreement context.
+
+**ClaimID:** The point of reference for routine departmental activities and all customer-facing communications. Format default `[WarrantyID]-C[NNNN]` (per-org configurable). Inherits from WarrantyID.
+
+**Tenant:** The highest-level identifier. Each warrantor organization is a tenant. All data is structurally scoped to a tenant. No cross-tenant operations exist except authorized platform administration.
 
 ---
 
