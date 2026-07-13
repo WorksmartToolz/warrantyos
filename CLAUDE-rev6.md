@@ -92,26 +92,30 @@ alternative approaches that bypass the missing prerequisite. The
 user decides whether to install the prerequisite or to revisit the
 approach.
 
-**Hosted database migration hazard — STOP before any remote push.**
-The hosted/remote Supabase database's migration history is NOT
-baselined: it has no record of 000_baseline or migrations 001-004,
-because the initial tables were created manually in the SQL Editor
-before the migrations directory existed. Therefore: do NOT run
-`supabase db push`, `supabase db remote commit`, `supabase migration
-up --linked`, or any command that applies local migrations to the
-hosted/remote/production database — until the remote has been
-baselined via `supabase migration repair` (marking 000_baseline and
-001-004 as already-applied without running them). If asked to push
-migrations to the remote, STOP, state this hazard, and confirm the
-remote has been baselined first. This is expected to be handled in
-Phase 4. Surface it; do not work around it.
+**Hosted database migration hazard — RESOLVED 2026-07-12.**
+The hosted/remote Supabase database was baselined on 2026-07-12 via
+`supabase migration repair` (migrations 000_baseline and 001-004 marked
+as already-applied without running them, since the initial tables were
+created manually in the SQL Editor before the migrations directory
+existed). All four Phase 4 transition criteria (Decision 22.8) are
+satisfied. Normal migration workflow is now unblocked: `supabase db push`
+and related commands may be used against the hosted database following
+standard practice.
+
+Execution record: docs/session-handoffs/phase4-baseline-execution-record.md
+(pre-state: empty remote history; Gate 6 cosmetic CRLF drift verified
+non-behavioral and accepted; CLI 2.101.0 pinned as the tested baseline
+version).
+
+Historical context (what the hazard was, before resolution): the remote
+migration history had no record of 000-004, so applying local migrations
+to the remote would have failed or duplicated existing objects. The rule
+was: do not push local migrations to the remote until baselined. That
+condition no longer holds.
 
 See Phase 3 Decision 22 (docs/session-handoffs/5e-bridge-phase3-decisions-log-rev6.md)
 and the Database Migration Tooling section in docs/architecture-reference.md
 for the locked baseline procedure, the six-gate pre-procedure verification
 (including drift verification per Decision 22.9), the six named failure
 modes A through F, the Mode C gating procedure (per Decision 22.10), and
-the four Phase 4 transition criteria (per Decision 22.8). The stop-point
-above remains in force until all four Phase 4 transition criteria are
-satisfied; only then does the stop-point change to RESOLVED status with
-execution date.
+the four Phase 4 transition criteria (per Decision 22.8).
