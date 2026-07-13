@@ -4325,334 +4325,6 @@ Phase 4 implementers do NOT need to invent a backfill script.
 Section cascade updates land in subsequent commits this session.
 
 ---
-## Future decisions
-
-Decisions 17+ will be appended above this section as triage-and-resolve
-work continues on the remaining Cat 3 items from the original triage
-list. The most urgent remaining Cat 3 items (in priority order):
-
-### Decision 17 (next-session focused workstream)
-
-**Inspections Expansion + tenant-editable defaults pattern + Customer
-Work Authorization revision.**
-
-Surfaced mid-drafting of Work Plan Workflow (Session 5f). Three new
-enums proposed for the inspections entity, plus potentially a new
-Tier 1 platform pattern.
-
-Proposed enums (tenant-editable defaults; defaults provided by platform,
-admin at company setup can edit):
-
-- inspection_type (4 values): Warranty, Condition Assessment,
-  Remediation Verification, Failure Investigation
-- inspection_trigger (7 values): Warranty Claim, Customer Request,
-  Repeat Condition Verification, Post-Remediation Verification,
-  Failure Investigation, Preventative / Condition Assessment,
-  Internal Review
-- inspection_status (3 values): Open (inspection created, observations
-  in progress), Under Review (warranty review in progress), Issued
-  (customer NCR completed and released)
-
-The proposed status enum REPLACES the currently-committed 4-value
-status in Inspections Foundation (requested, scheduled, in_progress,
-completed). Semantics are different — the new shape captures the
-warranty-review workflow state rather than just the inspection
-lifecycle.
-
-Architectural questions to resolve in Decision 17:
-
-- The "tenant-editable defaults" pattern is potentially a new Tier 1
-  platform pattern. v2 currently has platform-locked enums OR
-  tenant-defined JSONB/templates; tenant-editable defaults is a third
-  shape (platform provides defaults, tenants can edit). If formalized,
-  it has implications across many sections (work_plan_type,
-  execution_path, claim_type, gate_purpose, event_type values on Work
-  Authorization and Notice of Defect) currently locked as
-  platform-level enums.
-- The status enum REPLACEMENT requires careful framing — the existing
-  4-value enum was corroborated by audit; the new 3-value enum needs
-  source-grounded justification.
-- Interaction with the existing performed_by / paid_by orthogonal
-  axes on Inspections Foundation. Adding inspection_type and
-  inspection_trigger creates additional axes; whether they're all
-  orthogonal or some are derived needs explicit framing.
-- The term "NCR" (non-conformance report) appearing in the status
-  semantics. Whether NCR is platform-level concept or per-tenant
-  naming convention needs confirmation.
-
-Downstream ripple identified by chat 4 verification:
-
-- Inspections Foundation section (obvious — its own schema changes
-  substantively).
-- Customer Work Authorization section (Decision 11) — contains a
-  specific status-value reference: "Work Authorization with
-  customer_decision = 'approved' is required before the inspection's
-  status can advance from 'requested' to 'scheduled'." This becomes
-  stale if the status enum changes; needs section revision parallel
-  to the Inspections Foundation revision.
-- Possibly a new Tier 1 pattern section (if tenant-editable defaults
-  is formalized).
-
-Work Plan Workflow has no material dependency on Decision 17;
-verified by chat 4 independent read during Session 5f. Decision 17
-work is its own focused architectural session.
-
-- ALA signature capture mechanism (legal-force question, may be
-  per-tenant)
-- Claim eligibility rules + emergency carve-outs
-- Hosted-DB-no-migration-history hazard (Phase 4 blocker, separate
-  session likely needed)
-- O&M Provider contact_type
-- Inspections claimant-attendance capture
-- Inspections requester axis
-- Customer review window length configurability (Service Report)
-- ALA reminder notifications via clock_events
-- Registration status enum richer values
-- contractual_date_manual creation-timing
-- end_date derivation mechanism (Warranty Type Coverages)
-
----
-
-## Future capabilities (post-Cat 3 backlog)
-
-The following capabilities are scoped product additions that build on
-the core platform after the Cat 3 architectural backlog resolves. They
-are not architectural debt; they are future product features whose
-architectural design becomes its own Decision when actively taken up.
-Each is documented here so that the scope, dependencies, and open
-architectural questions are captured at the moment they were
-identified, not reconstructed later from chat history.
-
-### Warranty Reserve Forecasting Capability
-
-**Identified mid-session 5f after Work Plan Workflow drafting
-completed.**
-
-#### Business problem
-
-Every warranty claim costs money. Most warrantor organizations
-estimate warranty reserve amounts using prior-year claim totals plus
-a small adjustment — a guess that ignores portfolio size and growth.
-A reserve sized for a small portfolio offers no real protection once
-the business grows. The platform should answer the question of how
-much to reserve with math grounded in actual claim experience rather
-than intuition.
-
-#### Capability scope
-
-A decision-support tool that uses the platform's claim history and
-project portfolio data to compute warranty reserve requirements as
-percentages of project sales price, scaling automatically with
-portfolio growth. The capability drives four distinct decision
-workflows:
-
-- **Reserve Adder % at contract signing.** Output a per-project
-  percentage to include in project pricing to pre-fund warranty risk,
-  building the cushion into margin before contract signature rather
-  than absorbing claim costs after the fact.
-- **Estimated Annual Reserve in finance reviews.** Forward-looking
-  total warranty liability across the portfolio, not just
-  backward-looking spend.
-- **Per-product-line reserve adder analysis for product strategy
-  reviews.** Lines with high adder percentages signal warranty costs
-  are consuming more margin than expected — surfaces the conversation
-  for product reviews before pricing decisions.
-- **Sensitivity Analysis for risk management.** Stress test showing
-  what reserve requirements look like if claim frequency or severity
-  increases above baseline — answers "what does exposure look like in
-  a bad year."
-
-#### Calculation approach (high-level)
-
-Reads claim history to compute frequency (claims per active project)
-and cost (mean + statistical buffer for cost variability above the
-average). Uses Total Sales Price as the denominator to express
-reserve requirements as percentages. Applies an admin/overhead
-loading factor. Aggregates per-product-line and portfolio-wide.
-
-Specific parameters (statistical buffer multiplier, admin/overhead
-loading factor percentage, aggregation rules, etc.) are NOT
-hard-coded — they are configurable per tenant via the
-tenant-editable defaults pattern. See Question 6 below for how this
-ties into Decision 17's pattern work.
-
-#### Architectural dependencies and open questions
-
-The capability has two main data inputs that affect platform
-architecture:
-
-**Input 1: Claim history.** Reads from existing claim entities
-(claims, work_plans, notices_of_defect, service_reports) plus the
-future Cost Tracking section. No new schema needed for this input
-beyond Cost Tracking, which is already on the roadmap.
-
-**Input 2: Project portfolio financial data.** Requires NEW financial
-dimensions on the Projects entity (currently committed Tier 2). The
-Projects entity does not currently capture any financial dimensions.
-Adding them is greenfield architecture.
-
-#### Open architectural questions
-
-The future Decision session that takes up this capability needs to
-resolve:
-
-**1. Data-vs-capability architectural pattern.**
-
-Per chat 4's verification analysis during Session 5f, the strongest
-architectural framing is the hybrid pattern: financial data fields
-exist as core platform schema (every tenant captures them, with
-independent value for sales analysis, margin reporting, and cost
-attribution); the reserve forecasting CALCULATION ENGINE, REPORTING,
-and ANALYTICS layer are feature-flagged per Phase 0 Item 18's Feature
-Flag System, gated by tenant entitlement to the monetizable
-extension.
-
-This pattern separates two concerns v2 has so far treated as one:
-"data exists" vs "capability is enabled." The pattern reuses for any
-future monetizable extension whose data inputs have independent value
-outside the extension itself.
-
-Sub-options ruled out by chat 4's analysis:
-
-- Multi-tenant schema variation (extension activation modifies
-  schema per tenant) — breaks v2's uniform-schema-across-tenants
-  assumption that other entities rely on.
-- Separate project_financials child table — adds join overhead for
-  every reporting query without earning its keep for just a few
-  scalar financial fields.
-
-**2. Phase 0 Item 18 scope extension.**
-
-The Feature Flag System's current documented scope is
-workflow-oriented (gating whether tenants can perform certain
-workflows). Reserve forecasting is a CAPABILITY gated by
-ENTITLEMENT, structurally similar but semantically different. The
-Decision session may need to extend Item 18's documented scope to
-explicitly cover monetizable capability-gating, not just workflow
-toggles. Small but architecturally meaningful extension.
-
-**3. Independent-value test for financial fields.**
-
-The hybrid pattern (data is core, capability is gated) is load-
-bearing on the claim that financial fields have value outside the
-reserve forecasting extension — sales analysis, margin reporting,
-cost attribution percentages. The Decision session should test this
-claim against operational reality. If the fields genuinely have
-independent value, the hybrid pattern wins. If they're dead weight
-for non-extension tenants, capture goes under the feature flag along
-with the calculation engine.
-
-**4. Required financial dimensions (over-provisioning question).**
-
-Andre's existing organization (Terrasmart) uses four financial
-dimensions to drive reserve forecasting:
-
-- Total Sales Price (reserve denominator)
-- Materials Cost (direct material component)
-- Labor Cost (installation scope where applicable)
-- Admin/Overhead Markup (organizational loading factor)
-
-The labels are Terrasmart-specific but the OPERATIONAL CONCEPT
-(capturing project sales/cost/margin structure) is industry-universal.
-The Decision session should confirm that four dimensions are
-SUFFICIENT for accurate reserve forecasting across the variety of
-warrantor business models, or expand the set.
-
-Asymmetric risk principle: if we plan for 7 dimensions and most
-tenants only use 5, that's fine — unused dimensions are nullable. If
-we plan for 4 and discover 7 are needed, the tool fails for some
-tenants OR requires later schema expansion (technically possible but
-operationally messier).
-
-Speculative additional candidate financial dimensions (not confirmed
-as needed; included as starting points for research during the
-Decision session):
-
-- Equipment/Capital Cost — when projects involve equipment
-  depreciation or capital amortization separate from materials
-- Subcontractor Cost — when subcontractor work is part of project
-  delivery and tracked separately from internal labor
-- Warranty Period in years — longer warranty drives higher reserves;
-  calculation input even though not strictly financial
-- Geographic Risk Factor — some warrantors may price reserves based
-  on regional climate/environmental risk variation
-- Product Mix Categorization — different product lines have
-  different failure modes; reserve calculation may need
-  product-mix-aware factors
-
-These are speculative pattern-matches from general engineering
-accounting practice, not confirmed from solar-EPC-specific domain
-research. The Decision session should validate against industry
-practice and confirm or expand the set.
-
-**5. Field-naming question.**
-
-The financial dimensions are operationally universal but labels vary
-across warrantor organizations. The Decision session should resolve:
-
-- Platform-locked column names with generic labels (e.g.,
-  total_sales_price), with UI label customization at the tenant
-  level (display "Contract Value" or whatever the tenant's preferred
-  terminology) — likely lean given other tenant-naming patterns in v2
-- Tenant-defined field labels with platform-locked column semantics
-- Some other approach surfaced during the Decision session
-
-**6. Calculation parameters use Decision 17's tenant-editable
-defaults pattern.**
-
-The reserve forecasting calculation includes parameters that should
-NOT be hard-coded: the statistical buffer multiplier, the
-admin/overhead loading factor, aggregation rules, and any other
-calculation tunables that future operational reality surfaces.
-
-Per Andre's instruction, these parameters use the tenant-editable
-defaults pattern: platform ships with sensible defaults, admin at
-company setup can edit them per tenant. This is the SAME
-architectural pattern Decision 17 is taking up for Inspections
-(inspection_type, inspection_trigger, inspection_status defaults).
-
-The reserve forecasting Decision session does NOT need to
-re-architect the tenant-editable defaults mechanism. It just applies
-whatever pattern Decision 17 establishes. The Decision 17 work
-should be explicit that the pattern is platform-wide, not
-Inspections-specific.
-
-If the tenant-editable defaults pattern emerges as a new Tier 1
-platform pattern (which chat 4's verification suggested it might),
-reserve forecasting calculation parameters are one of its canonical
-uses alongside Inspections.
-
-#### Precedent significance
-
-The Decision session that resolves this capability also establishes
-the precedent pattern for future monetizable extensions on the
-platform. Whatever architectural pattern lands here (hybrid data-
-core/capability-gated, or capability-gated-only, or other) becomes
-the template for the next monetizable extension. The Decision
-session should be explicit that it is setting a reusable pattern,
-not just resolving this one case.
-
-#### Cross-section dependencies
-
-- **Projects entity (Tier 2):** requires schema expansion to add the
-  financial dimensions. Parallel to Decision 17's Inspections
-  Foundation revision pattern.
-- **Cost Tracking (future Tier 3):** reads project financials to
-  attribute claim costs back as percentages of sales price. Cost
-  Tracking's queries assume the financial fields exist on Projects.
-- **Feature Flag System (Phase 0 Item 18):** scope extension to
-  cover capability-gating beyond workflow-gating.
-- **Decision 17 tenant-editable defaults pattern:** calculation
-  parameters use this pattern; reserve forecasting is one of the
-  canonical uses if the pattern formalizes as Tier 1.
-
-#### Implementation status
-
-Not yet drafted. Captured here as future scope for the Decision
-session that takes up reserve forecasting. Priority ordering:
-after the 11 Cat 3 backlog items and Decision 17 resolve.
-
----
 
 ## Decision 24: end_date Derivation Mechanism (Warranty Type Coverages)
 
@@ -5386,3 +5058,244 @@ Decision 20.8 flagged a separate audit mechanism as needed for this. It is no lo
 ### Cat 3 backlog impact
 
 Item #9 resolved. Cat 3 backlog is now fully resolved — zero items remaining.
+
+---
+
+## Future capabilities (post-Cat 3 backlog)
+
+The following capabilities are scoped product additions that build on
+the core platform after the Cat 3 architectural backlog resolves. They
+are not architectural debt; they are future product features whose
+architectural design becomes its own Decision when actively taken up.
+Each is documented here so that the scope, dependencies, and open
+architectural questions are captured at the moment they were
+identified, not reconstructed later from chat history.
+
+### Warranty Reserve Forecasting Capability
+
+**Identified mid-session 5f after Work Plan Workflow drafting
+completed.**
+
+#### Business problem
+
+Every warranty claim costs money. Most warrantor organizations
+estimate warranty reserve amounts using prior-year claim totals plus
+a small adjustment — a guess that ignores portfolio size and growth.
+A reserve sized for a small portfolio offers no real protection once
+the business grows. The platform should answer the question of how
+much to reserve with math grounded in actual claim experience rather
+than intuition.
+
+#### Capability scope
+
+A decision-support tool that uses the platform's claim history and
+project portfolio data to compute warranty reserve requirements as
+percentages of project sales price, scaling automatically with
+portfolio growth. The capability drives four distinct decision
+workflows:
+
+- **Reserve Adder % at contract signing.** Output a per-project
+  percentage to include in project pricing to pre-fund warranty risk,
+  building the cushion into margin before contract signature rather
+  than absorbing claim costs after the fact.
+- **Estimated Annual Reserve in finance reviews.** Forward-looking
+  total warranty liability across the portfolio, not just
+  backward-looking spend.
+- **Per-product-line reserve adder analysis for product strategy
+  reviews.** Lines with high adder percentages signal warranty costs
+  are consuming more margin than expected — surfaces the conversation
+  for product reviews before pricing decisions.
+- **Sensitivity Analysis for risk management.** Stress test showing
+  what reserve requirements look like if claim frequency or severity
+  increases above baseline — answers "what does exposure look like in
+  a bad year."
+
+#### Calculation approach (high-level)
+
+Reads claim history to compute frequency (claims per active project)
+and cost (mean + statistical buffer for cost variability above the
+average). Uses Total Sales Price as the denominator to express
+reserve requirements as percentages. Applies an admin/overhead
+loading factor. Aggregates per-product-line and portfolio-wide.
+
+Specific parameters (statistical buffer multiplier, admin/overhead
+loading factor percentage, aggregation rules, etc.) are NOT
+hard-coded — they are configurable per tenant via the
+tenant-editable defaults pattern. See Question 6 below for how this
+ties into Decision 17's pattern work.
+
+#### Architectural dependencies and open questions
+
+The capability has two main data inputs that affect platform
+architecture:
+
+**Input 1: Claim history.** Reads from existing claim entities
+(claims, work_plans, notices_of_defect, service_reports) plus the
+future Cost Tracking section. No new schema needed for this input
+beyond Cost Tracking, which is already on the roadmap.
+
+**Input 2: Project portfolio financial data.** Requires NEW financial
+dimensions on the Projects entity (currently committed Tier 2). The
+Projects entity does not currently capture any financial dimensions.
+Adding them is greenfield architecture.
+
+#### Open architectural questions
+
+The future Decision session that takes up this capability needs to
+resolve:
+
+**1. Data-vs-capability architectural pattern.**
+
+Per chat 4's verification analysis during Session 5f, the strongest
+architectural framing is the hybrid pattern: financial data fields
+exist as core platform schema (every tenant captures them, with
+independent value for sales analysis, margin reporting, and cost
+attribution); the reserve forecasting CALCULATION ENGINE, REPORTING,
+and ANALYTICS layer are feature-flagged per Phase 0 Item 18's Feature
+Flag System, gated by tenant entitlement to the monetizable
+extension.
+
+This pattern separates two concerns v2 has so far treated as one:
+"data exists" vs "capability is enabled." The pattern reuses for any
+future monetizable extension whose data inputs have independent value
+outside the extension itself.
+
+Sub-options ruled out by chat 4's analysis:
+
+- Multi-tenant schema variation (extension activation modifies
+  schema per tenant) — breaks v2's uniform-schema-across-tenants
+  assumption that other entities rely on.
+- Separate project_financials child table — adds join overhead for
+  every reporting query without earning its keep for just a few
+  scalar financial fields.
+
+**2. Phase 0 Item 18 scope extension.**
+
+The Feature Flag System's current documented scope is
+workflow-oriented (gating whether tenants can perform certain
+workflows). Reserve forecasting is a CAPABILITY gated by
+ENTITLEMENT, structurally similar but semantically different. The
+Decision session may need to extend Item 18's documented scope to
+explicitly cover monetizable capability-gating, not just workflow
+toggles. Small but architecturally meaningful extension.
+
+**3. Independent-value test for financial fields.**
+
+The hybrid pattern (data is core, capability is gated) is load-
+bearing on the claim that financial fields have value outside the
+reserve forecasting extension — sales analysis, margin reporting,
+cost attribution percentages. The Decision session should test this
+claim against operational reality. If the fields genuinely have
+independent value, the hybrid pattern wins. If they're dead weight
+for non-extension tenants, capture goes under the feature flag along
+with the calculation engine.
+
+**4. Required financial dimensions (over-provisioning question).**
+
+Andre's existing organization (Terrasmart) uses four financial
+dimensions to drive reserve forecasting:
+
+- Total Sales Price (reserve denominator)
+- Materials Cost (direct material component)
+- Labor Cost (installation scope where applicable)
+- Admin/Overhead Markup (organizational loading factor)
+
+The labels are Terrasmart-specific but the OPERATIONAL CONCEPT
+(capturing project sales/cost/margin structure) is industry-universal.
+The Decision session should confirm that four dimensions are
+SUFFICIENT for accurate reserve forecasting across the variety of
+warrantor business models, or expand the set.
+
+Asymmetric risk principle: if we plan for 7 dimensions and most
+tenants only use 5, that's fine — unused dimensions are nullable. If
+we plan for 4 and discover 7 are needed, the tool fails for some
+tenants OR requires later schema expansion (technically possible but
+operationally messier).
+
+Speculative additional candidate financial dimensions (not confirmed
+as needed; included as starting points for research during the
+Decision session):
+
+- Equipment/Capital Cost — when projects involve equipment
+  depreciation or capital amortization separate from materials
+- Subcontractor Cost — when subcontractor work is part of project
+  delivery and tracked separately from internal labor
+- Warranty Period in years — longer warranty drives higher reserves;
+  calculation input even though not strictly financial
+- Geographic Risk Factor — some warrantors may price reserves based
+  on regional climate/environmental risk variation
+- Product Mix Categorization — different product lines have
+  different failure modes; reserve calculation may need
+  product-mix-aware factors
+
+These are speculative pattern-matches from general engineering
+accounting practice, not confirmed from solar-EPC-specific domain
+research. The Decision session should validate against industry
+practice and confirm or expand the set.
+
+**5. Field-naming question.**
+
+The financial dimensions are operationally universal but labels vary
+across warrantor organizations. The Decision session should resolve:
+
+- Platform-locked column names with generic labels (e.g.,
+  total_sales_price), with UI label customization at the tenant
+  level (display "Contract Value" or whatever the tenant's preferred
+  terminology) — likely lean given other tenant-naming patterns in v2
+- Tenant-defined field labels with platform-locked column semantics
+- Some other approach surfaced during the Decision session
+
+**6. Calculation parameters use Decision 17's tenant-editable
+defaults pattern.**
+
+The reserve forecasting calculation includes parameters that should
+NOT be hard-coded: the statistical buffer multiplier, the
+admin/overhead loading factor, aggregation rules, and any other
+calculation tunables that future operational reality surfaces.
+
+Per Andre's instruction, these parameters use the tenant-editable
+defaults pattern: platform ships with sensible defaults, admin at
+company setup can edit them per tenant. This is the SAME
+architectural pattern Decision 17 is taking up for Inspections
+(inspection_type, inspection_trigger, inspection_status defaults).
+
+The reserve forecasting Decision session does NOT need to
+re-architect the tenant-editable defaults mechanism. It just applies
+whatever pattern Decision 17 establishes. The Decision 17 work
+should be explicit that the pattern is platform-wide, not
+Inspections-specific.
+
+If the tenant-editable defaults pattern emerges as a new Tier 1
+platform pattern (which chat 4's verification suggested it might),
+reserve forecasting calculation parameters are one of its canonical
+uses alongside Inspections.
+
+#### Precedent significance
+
+The Decision session that resolves this capability also establishes
+the precedent pattern for future monetizable extensions on the
+platform. Whatever architectural pattern lands here (hybrid data-
+core/capability-gated, or capability-gated-only, or other) becomes
+the template for the next monetizable extension. The Decision
+session should be explicit that it is setting a reusable pattern,
+not just resolving this one case.
+
+#### Cross-section dependencies
+
+- **Projects entity (Tier 2):** requires schema expansion to add the
+  financial dimensions. Parallel to Decision 17's Inspections
+  Foundation revision pattern.
+- **Cost Tracking (future Tier 3):** reads project financials to
+  attribute claim costs back as percentages of sales price. Cost
+  Tracking's queries assume the financial fields exist on Projects.
+- **Feature Flag System (Phase 0 Item 18):** scope extension to
+  cover capability-gating beyond workflow-gating.
+- **Decision 17 tenant-editable defaults pattern:** calculation
+  parameters use this pattern; reserve forecasting is one of the
+  canonical uses if the pattern formalizes as Tier 1.
+
+#### Implementation status
+
+Not yet drafted. Captured here as future scope for the Decision
+session that takes up reserve forecasting. Priority ordering:
+after the 11 Cat 3 backlog items and Decision 17 resolve.
