@@ -4990,6 +4990,8 @@ This Decision replaces that block's condition — not its location, not the surr
 
 The moment each of the three Server Actions fires (Indistinct outcome, warrantor-send, reviewer-acceptance) is unchanged. Only the O&M-actor permission check inside each action changes, and only in the way those three sections already flagged as pending Cat 3 #9. Confirmed via Claude Code audit (Session F) against the live repo: no code yet exists for any of the three Server Actions; the block condition exists only as architectural prose at docs/architecture-reference.md:4230-4235 (ALA), :5806-5812 (Work Authorization), :4963-4967 (Service Report) — all three quotes identical in shape, confirmed consistent, no divergence found.
 
+*[Doc-control note, added by Chat 9 (2026-07-12): the architecture-reference.md line numbers in the sentence above were accurate as of Session F. Commit b170a95 (identity-section restoration) later shifted architecture-reference.md line numbers; the three O&M blocks have moved down ~30 lines. Locate them by content — each is the O&M `contact_type` permission check for a signed `om_authorization_documents` row, in the ALA, Work Authorization, and Service Report sections — not by the frozen line numbers above.]*
+
 **28.8: Signature mechanism reused, not reinvented.**
 
 Per 20.8's original guidance (still valid — this part of the scope didn't shift), signature capture reuses Decision 19's in_platform_widget with typed-name fallback for accessibility. No new signing mechanism is introduced.
