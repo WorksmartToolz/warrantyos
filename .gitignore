@@ -40,3 +40,4 @@ Thumbs.db
 # TypeScript build info
 *.tsbuildinfo
 next-env.d.ts
+migration_history_backup_*.sql
