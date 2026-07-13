@@ -1,4 +1,4 @@
-**Last updated:** 995ba83 2026-07-12
+**Last updated:** b170a95 2026-07-12
 
 # WarrantyOS — Architectural Reference
 
