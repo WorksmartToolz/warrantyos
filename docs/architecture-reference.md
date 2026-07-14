@@ -53,8 +53,12 @@ The platform operates per the following named principles:
 ## Standard RLS Pattern
 
 **Status: Implemented** (the core pattern across `tenants`, `users`,
-`invitations`; the `tenant_id` denormalization convention is **Designed**,
-locked by Decisions 3 and 5, applying to child tables not yet built).
+`invitations`, and the Phase 3 child tables built as migrations 005-012
+(`contacts`, `projects`, `import_batches`, `tenant_id_sequences`,
+`warranty_registrations`, `warranty_types`, `warranty_coverages`); the
+`tenant_id` denormalization convention, locked by Decisions 3 and 5, is applied
+on each of those child tables. The View security convention per Decision 24.5
+is applied on `warranty_coverages_effective`.)
 
 WarrantyOS is multi-tenant: every row of tenant-owned data belongs to exactly
 one tenant, and no user may read or write another tenant's data. This isolation
@@ -526,8 +530,9 @@ real when its own architectural decision is made.
 
 ## Unified Contacts Directory
 
-**Status: Designed** (Phase 0 Item 16, added during Decision 1; not yet built.
-`contacts` is one of the Phase 3 tables to be migrated.)
+**Status: Implemented (schema)** (Phase 0 Item 16, added during Decision 1.
+`contacts` is built as migration 005, with the Standard RLS Pattern applied.
+Server Actions and UI for contacts are not yet built.)
 
 WarrantyOS interacts with many parties who are not platform users: customers and
 their contacts, subcontractors and theirs, vendors and theirs, and the people a
@@ -781,8 +786,11 @@ Team Admins create and manage definitions; Reviewers and Viewers consume them �
 filling values on entity records, reading them back. Definition management is a
 tenant-admin capability; value entry is part of ordinary operational work.
 ## FK + Snapshot Pattern
-**Status: Designed** (convention established by Decisions 1 and 8; applies to
-tables not yet built — projects, warranty_registrations).
+**Status: Implemented (schema)** (convention established by Decisions 1 and 8;
+applied on `projects` (migration 006, single-FK customer shape) and
+`warranty_registrations` (migration 010, dual-FK assignee shape with the
+exactly-one-non-null CHECK). Server Actions that capture the snapshots at
+association time are not yet built.)
 WarrantyOS warranties run on long horizons — up to 25 years. Over that span the
 people and organizations a record refers to change: a subcontractor's contact
 person leaves, a customer's phone number changes, a directory record is edited.
@@ -1015,10 +1023,13 @@ implementation backing.
 
 ## ID Generation
 
-**Status: Designed** (locked by Decision 2; not yet built. tenant_id_sequences
-is a Phase 3 table to be migrated. The hardcoded WID-YYYY-NNNNNN label in the
-settings page today is a placeholder, replaced by the real generated format
-when the settings UI becomes live.)
+**Status: Implemented (schema)** (locked by Decision 2. tenant_id_sequences is
+built as migration 009, with the composite (tenant_id, id_type) primary key and
+the two Phase 1 id_type rows backfilled for existing tenants. The generation
+logic itself — the transactional lock-increment-format Server Action — is not
+yet built, nor is the provisioning seed for new tenants. The hardcoded
+WID-YYYY-NNNNNN label in the settings page today is a placeholder, replaced by
+the real generated format when the settings UI becomes live.)
 
 WarrantyOS generates two kinds of business-visible identifier: WarrantyIDs on
 every warranty registration and ClaimIDs on every claim. Both appear in
@@ -2118,10 +2129,11 @@ prompt is the safer default and is the architectural commitment.
 
 ## Project
 
-**Status: Designed** (the sacred root entity; not yet built. projects is a
-Phase 3 table to be migrated. Multi-source trigger model from Item 17 is
-integrated; soft-delete discriminator specified per Decision 5's downstream
-requirement.)
+**Status: Implemented (schema)** (the sacred root entity. projects is built as
+migration 006, with the multi-source trigger model from Item 17 integrated and
+the soft-delete discriminator specified per Decision 5's downstream
+requirement. Server Actions — including the trigger_date enforcement and the
+clock-event scheduling per Decision 23.11's guards — are not yet built.)
 
 Project is the root entity of the WarrantyOS data model. Every warranty
 registration belongs to exactly one project. Every claim is filed against a
@@ -2486,9 +2498,13 @@ reason for each:
 
 ## Warranty Registration
 
-**Status: Designed** (Phase 3 table to be migrated. The assignee model is
+**Status: Implemented (schema)** (built as migration 010. The assignee model is
 locked by Decision 1, the FK direction and 1:1 enforcement by Decision 5, the
-WarrantyID issuance by Decision 2 and Item 17. The Section 7 activation gate's
+status state machine and actual_start_date by Decision 23, and WarrantyID
+issuance by Decision 2 and Item 17 as revised by Decision 27 (early issuance,
+decoupled from Section 7 completion — see the WarrantyID issuance subsection).
+Server Actions — the clock-event dispatcher that creates and assigns the row,
+and the issuance logic — are not yet built. The Section 7 activation gate's
 specific conditions are not specified at the architectural layer and are
 flagged as a Phase 4 / downstream-operational question.)
 
@@ -2892,11 +2908,15 @@ A short list of deliberate omissions, parallel to the Project section:
 
 ## Warranty Type Coverages
 
-**Status: Designed** (Phase 3 tables to be migrated. warranty_types is locked
-by Decision 6 with defense-in-depth anchor protection; warranty_coverages
-follows the shape Audit Topic 8 specifies. The mechanism for end_date
-derivation — application layer vs Postgres generated column — is a Phase 3
-implementation choice flagged below.)
+**Status: Implemented (schema)** (warranty_types is built as migration 011,
+locked by Decision 6, with the defense-in-depth anchor protection trigger and
+the case-insensitive uniqueness index; warranty_coverages is built as migration
+012, following the shape Audit Topic 8 specifies. The mechanism for end_date
+derivation is resolved by Decision 24 — the `warranty_coverages_effective`
+view, built in migration 012 with `security_invoker = true` per 24.5. The
+earlier "application layer vs Postgres generated column" framing is superseded;
+see the "end_date is derived, not stored" subsection. Server Actions — coverage
+creation during the prep window per Decision 23.6 — are not yet built.)
 
 A warranty registration covers one or more warranty types over their own
 terms. Foundation might run 5 years; racking, 25; workmanship, 10. The
