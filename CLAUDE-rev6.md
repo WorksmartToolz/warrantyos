@@ -82,6 +82,17 @@ line counts.** When an edit adds or removes lines in a file that
 other documents cite by line number, confirm each citing range
 still lands on the content it claims. A pure rename does not
 shift line numbers; a content edit can. (Convention 8.)
+**Migrations and their Status lines land together.** When a
+migration creates a table, view, or index that an
+architecture-reference.md section describes, that section's
+`**Status:**` line is updated in the same commit as the
+migration. A Status line claiming "not yet built" for a built
+table is a pointer to a state that no longer exists; a future
+reader trusts it and rebuilds what already exists. Use
+`Implemented (schema)` when the schema exists but the Server
+Actions and UI do not — precise about what is done and what is
+not. This is Convention 7a applied at the moment of the build
+rather than retroactively. (Convention 9.)
 
 ## Stop-point discipline
 
