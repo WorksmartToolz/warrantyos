@@ -1036,6 +1036,13 @@ in, and the latest counter value used in that year. Generation reads and
 updates this row in the same transaction as the row that consumes the
 identifier, which gives the gap-free guarantee.
 
+These rows are seeded at tenant provisioning: when a tenant is created, the
+provisioning operation inserts one row per Phase 1 id_type (warranty_id,
+claim_id) with the default format string for that tenant. Because generation
+locks an existing row rather than creating one, the rows must exist before
+the first WarrantyID or ClaimID is generated; provisioning is the point at
+which they are created.
+
     tenant_id_sequences
       tenant_id      uuid FK -> tenants
       id_type        text  -- 'warranty_id' | 'claim_id'
