@@ -67,6 +67,30 @@ $$;
 ALTER FUNCTION "public"."get_user_tenant_id"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."protect_system_warranty_types"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if tg_op = 'DELETE' then
+    if old.is_system then
+      raise exception 'Cannot delete a system warranty type (is_system = true).';
+    end if;
+    return old;
+  elsif tg_op = 'UPDATE' then
+    if old.is_system and not new.is_system then
+      raise exception 'Cannot clear is_system on a system warranty type.';
+    end if;
+    return new;
+  end if;
+  return null;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."protect_system_warranty_types"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."set_updated_at"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     SET "search_path" TO 'public'
@@ -307,6 +331,27 @@ COMMENT ON COLUMN "public"."warranty_registrations"."actual_start_date" IS 'Warr
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."warranty_types" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "is_system" boolean DEFAULT false NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."warranty_types" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."warranty_types" IS 'Per-tenant configurable warranty type list. Coverages instantiate these on registrations. Two anchor types (Standard Warranty, Workmanship Warranty) are seeded per tenant with is_system=true and are permanent. Decision 6; architecture-reference.md Warranty Type Coverages section.';
+
+
+
+COMMENT ON COLUMN "public"."warranty_types"."is_system" IS 'True on anchor types seeded at provisioning. Protected from DELETE and from is_system->false by defense-in-depth (Server Action + DB trigger, Decision 6). Renameable, not deleteable.';
+
+
+
 ALTER TABLE ONLY "public"."contacts"
     ADD CONSTRAINT "contacts_pkey" PRIMARY KEY ("id");
 
@@ -362,6 +407,11 @@ ALTER TABLE ONLY "public"."warranty_registrations"
 
 
 
+ALTER TABLE ONLY "public"."warranty_types"
+    ADD CONSTRAINT "warranty_types_pkey" PRIMARY KEY ("id");
+
+
+
 CREATE INDEX "contacts_linked_om_provider_id_idx" ON "public"."contacts" USING "btree" ("linked_om_provider_id");
 
 
@@ -398,11 +448,19 @@ CREATE INDEX "users_tenant_id_idx" ON "public"."users" USING "btree" ("tenant_id
 
 
 
+CREATE UNIQUE INDEX "warranty_types_tenant_name_lower_unique" ON "public"."warranty_types" USING "btree" ("tenant_id", "lower"("name"));
+
+
+
 CREATE OR REPLACE TRIGGER "tenants_set_updated_at" BEFORE UPDATE ON "public"."tenants" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
 
 
 
 CREATE OR REPLACE TRIGGER "users_set_updated_at" BEFORE UPDATE ON "public"."users" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "warranty_types_protect_system" BEFORE DELETE OR UPDATE ON "public"."warranty_types" FOR EACH ROW EXECUTE FUNCTION "public"."protect_system_warranty_types"();
 
 
 
@@ -496,6 +554,11 @@ ALTER TABLE ONLY "public"."warranty_registrations"
 
 
 
+ALTER TABLE ONLY "public"."warranty_types"
+    ADD CONSTRAINT "warranty_types_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
 ALTER TABLE "public"."contacts" ENABLE ROW LEVEL SECURITY;
 
 
@@ -557,6 +620,13 @@ ALTER TABLE "public"."warranty_registrations" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "warranty_registrations: members can view their tenant's rows" ON "public"."warranty_registrations" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."warranty_types" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "warranty_types: members can view their tenant's rows" ON "public"."warranty_types" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -792,6 +862,12 @@ GRANT ALL ON TABLE "public"."users" TO "service_role";
 GRANT ALL ON TABLE "public"."warranty_registrations" TO "anon";
 GRANT ALL ON TABLE "public"."warranty_registrations" TO "authenticated";
 GRANT ALL ON TABLE "public"."warranty_registrations" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."warranty_types" TO "anon";
+GRANT ALL ON TABLE "public"."warranty_types" TO "authenticated";
+GRANT ALL ON TABLE "public"."warranty_types" TO "service_role";
 
 
 
