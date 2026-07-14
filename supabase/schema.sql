@@ -291,6 +291,30 @@ COMMENT ON COLUMN "public"."users"."removed_at" IS 'Set when a team admin remove
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."warranty_coverages" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "warranty_registration_id" "uuid" NOT NULL,
+    "warranty_type_id" "uuid" NOT NULL,
+    "start_date" "date" NOT NULL,
+    "term_years" integer NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "warranty_coverages_term_years_check" CHECK (("term_years" > 0))
+);
+
+
+ALTER TABLE "public"."warranty_coverages" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."warranty_coverages" IS 'One warranty type instantiated on one registration. start_date is an immutable trigger_date snapshot (Decision 23.5); end_date is NOT stored - read effective start/end from warranty_coverages_effective (Decision 24). One row per (registration, type).';
+
+
+
+COMMENT ON COLUMN "public"."warranty_coverages"."start_date" IS 'Immutable snapshot of projects.trigger_date at coverage creation (Decision 23.5). Never read directly for effective-start purposes - use warranty_coverages_effective.effective_start_date (Decisions 23.5a/24.3).';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."warranty_registrations" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -328,6 +352,26 @@ COMMENT ON COLUMN "public"."warranty_registrations"."status" IS 'Four-state mach
 
 
 COMMENT ON COLUMN "public"."warranty_registrations"."actual_start_date" IS 'Warrantor-confirmed operational start date (Decision 23.4). Null until confirmed. Effective start is COALESCE(actual_start_date, coverage/trigger date) derived at query time (23.5/23.9) - never read this or trigger_date directly for effective-start purposes (23.5a application invariant).';
+
+
+
+CREATE OR REPLACE VIEW "public"."warranty_coverages_effective" WITH ("security_invoker"='true') AS
+ SELECT "c"."id",
+    "c"."tenant_id",
+    "c"."warranty_registration_id",
+    "c"."warranty_type_id",
+    "c"."start_date",
+    "c"."term_years",
+    COALESCE("r"."actual_start_date", "c"."start_date") AS "effective_start_date",
+    ((COALESCE("r"."actual_start_date", "c"."start_date") + (("c"."term_years" || ' years'::"text"))::interval))::"date" AS "effective_end_date"
+   FROM ("public"."warranty_coverages" "c"
+     JOIN "public"."warranty_registrations" "r" ON (("r"."id" = "c"."warranty_registration_id")));
+
+
+ALTER VIEW "public"."warranty_coverages_effective" OWNER TO "postgres";
+
+
+COMMENT ON VIEW "public"."warranty_coverages_effective" IS 'Canonical read surface for coverage effective_start_date and effective_end_date (Decision 24). COALESCE(registration.actual_start_date, coverage.start_date) for start; start + term_years for end. security_invoker=true so underlying-table RLS is enforced (24.5). All effective start/end reads MUST use this view (24.3).';
 
 
 
@@ -394,6 +438,16 @@ ALTER TABLE ONLY "public"."tenants"
 
 ALTER TABLE ONLY "public"."users"
     ADD CONSTRAINT "users_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."warranty_coverages"
+    ADD CONSTRAINT "warranty_coverages_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."warranty_coverages"
+    ADD CONSTRAINT "warranty_coverages_registration_type_unique" UNIQUE ("warranty_registration_id", "warranty_type_id");
 
 
 
@@ -534,6 +588,21 @@ ALTER TABLE ONLY "public"."users"
 
 
 
+ALTER TABLE ONLY "public"."warranty_coverages"
+    ADD CONSTRAINT "warranty_coverages_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."warranty_coverages"
+    ADD CONSTRAINT "warranty_coverages_warranty_registration_id_fkey" FOREIGN KEY ("warranty_registration_id") REFERENCES "public"."warranty_registrations"("id");
+
+
+
+ALTER TABLE ONLY "public"."warranty_coverages"
+    ADD CONSTRAINT "warranty_coverages_warranty_type_id_fkey" FOREIGN KEY ("warranty_type_id") REFERENCES "public"."warranty_types"("id");
+
+
+
 ALTER TABLE ONLY "public"."warranty_registrations"
     ADD CONSTRAINT "warranty_registrations_assigned_to_contact_id_fkey" FOREIGN KEY ("assigned_to_contact_id") REFERENCES "public"."contacts"("id");
 
@@ -613,6 +682,13 @@ CREATE POLICY "users: members can update their own profile" ON "public"."users" 
 
 
 CREATE POLICY "users: members can view users in their tenant" ON "public"."users" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."warranty_coverages" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "warranty_coverages: members can view their tenant's rows" ON "public"."warranty_coverages" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -859,9 +935,21 @@ GRANT ALL ON TABLE "public"."users" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."warranty_coverages" TO "anon";
+GRANT ALL ON TABLE "public"."warranty_coverages" TO "authenticated";
+GRANT ALL ON TABLE "public"."warranty_coverages" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."warranty_registrations" TO "anon";
 GRANT ALL ON TABLE "public"."warranty_registrations" TO "authenticated";
 GRANT ALL ON TABLE "public"."warranty_registrations" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."warranty_coverages_effective" TO "anon";
+GRANT ALL ON TABLE "public"."warranty_coverages_effective" TO "authenticated";
+GRANT ALL ON TABLE "public"."warranty_coverages_effective" TO "service_role";
 
 
 
