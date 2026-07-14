@@ -267,6 +267,46 @@ COMMENT ON COLUMN "public"."users"."removed_at" IS 'Set when a team admin remove
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."warranty_registrations" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "project_id" "uuid" NOT NULL,
+    "warranty_id" "text",
+    "status" "text" NOT NULL,
+    "assigned_to_contact_id" "uuid",
+    "assigned_to_user_id" "uuid",
+    "assigned_to_name_snapshot" "text",
+    "assigned_to_email_snapshot" "text",
+    "assigned_to_phone_snapshot" "text",
+    "assigned_at" timestamp with time zone,
+    "activated_at" timestamp with time zone,
+    "actual_start_date" "date",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "warranty_registrations_assignee_check" CHECK (((("status" = 'pre_activation'::"text") AND ("assigned_to_contact_id" IS NULL) AND ("assigned_to_user_id" IS NULL)) OR (("status" = ANY (ARRAY['assigned'::"text", 'active'::"text", 'rejected'::"text"])) AND (("assigned_to_contact_id" IS NOT NULL) <> ("assigned_to_user_id" IS NOT NULL))))),
+    CONSTRAINT "warranty_registrations_status_check" CHECK (("status" = ANY (ARRAY['pre_activation'::"text", 'assigned'::"text", 'active'::"text", 'rejected'::"text"])))
+);
+
+
+ALTER TABLE "public"."warranty_registrations" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."warranty_registrations" IS 'Parent record for one warranty agreement on one project (1:1 with projects, enforced by UNIQUE project_id). Carries WarrantyID once issued, tracks the assignee, parents coverages and claims. Decisions 1/5/23; architecture-reference.md Warranty Registration section.';
+
+
+
+COMMENT ON COLUMN "public"."warranty_registrations"."warranty_id" IS 'Business-visible WarrantyID. Issued via tenant_id_sequences no later than effective_start_date (Decisions 2/27). Null until issued; immutable once set (app-layer enforcement).';
+
+
+
+COMMENT ON COLUMN "public"."warranty_registrations"."status" IS 'Four-state machine (Decision 23.7): pre_activation (edge fallback), assigned (prep), active (Section 7 passed, WarrantyID issued), rejected (Section 7 rejected, loops back to assigned). Transitions enforced app-layer.';
+
+
+
+COMMENT ON COLUMN "public"."warranty_registrations"."actual_start_date" IS 'Warrantor-confirmed operational start date (Decision 23.4). Null until confirmed. Effective start is COALESCE(actual_start_date, coverage/trigger date) derived at query time (23.5/23.9) - never read this or trigger_date directly for effective-start purposes (23.5a application invariant).';
+
+
+
 ALTER TABLE ONLY "public"."contacts"
     ADD CONSTRAINT "contacts_pkey" PRIMARY KEY ("id");
 
@@ -309,6 +349,16 @@ ALTER TABLE ONLY "public"."tenants"
 
 ALTER TABLE ONLY "public"."users"
     ADD CONSTRAINT "users_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."warranty_registrations"
+    ADD CONSTRAINT "warranty_registrations_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."warranty_registrations"
+    ADD CONSTRAINT "warranty_registrations_project_id_key" UNIQUE ("project_id");
 
 
 
@@ -426,6 +476,26 @@ ALTER TABLE ONLY "public"."users"
 
 
 
+ALTER TABLE ONLY "public"."warranty_registrations"
+    ADD CONSTRAINT "warranty_registrations_assigned_to_contact_id_fkey" FOREIGN KEY ("assigned_to_contact_id") REFERENCES "public"."contacts"("id");
+
+
+
+ALTER TABLE ONLY "public"."warranty_registrations"
+    ADD CONSTRAINT "warranty_registrations_assigned_to_user_id_fkey" FOREIGN KEY ("assigned_to_user_id") REFERENCES "public"."users"("id");
+
+
+
+ALTER TABLE ONLY "public"."warranty_registrations"
+    ADD CONSTRAINT "warranty_registrations_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."warranty_registrations"
+    ADD CONSTRAINT "warranty_registrations_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
 ALTER TABLE "public"."contacts" ENABLE ROW LEVEL SECURITY;
 
 
@@ -480,6 +550,13 @@ CREATE POLICY "users: members can update their own profile" ON "public"."users" 
 
 
 CREATE POLICY "users: members can view users in their tenant" ON "public"."users" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."warranty_registrations" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "warranty_registrations: members can view their tenant's rows" ON "public"."warranty_registrations" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -709,6 +786,12 @@ GRANT ALL ON TABLE "public"."tenants" TO "service_role";
 GRANT ALL ON TABLE "public"."users" TO "anon";
 GRANT ALL ON TABLE "public"."users" TO "authenticated";
 GRANT ALL ON TABLE "public"."users" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."warranty_registrations" TO "anon";
+GRANT ALL ON TABLE "public"."warranty_registrations" TO "authenticated";
+GRANT ALL ON TABLE "public"."warranty_registrations" TO "service_role";
 
 
 
