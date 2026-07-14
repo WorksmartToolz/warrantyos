@@ -4,8 +4,9 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-12 (Chat 9), from verified git history (85 commits) and
-the architecture-reference.md status tally. Not from memory or handoff summaries.
+**Last built:** 2026-07-14 (Chat 10), from verified git history and direct disk
+reads. Phase 4 baseline is complete and Phase 3 table construction has begun.
+Not from memory or handoff summaries.
 
 ---
 
@@ -16,9 +17,10 @@ solar/renewables operations. Its foundation is **built and working**: auth,
 multi-tenancy, RLS isolation, tenant provisioning, invitations, admin UI. Its
 entire operational core — claims, ALA, inspections, work authorizations, service
 reports, warranty registration, O&M authorization — is **fully designed and
-locked (28 architectural decisions) but not yet built in code**. The project
-spent its last ~60 commits designing, not building. The next era is building,
-and it is gated by one setup task: the Phase 4 hosted-database baseline.
+locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
+gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
+construction has started**: the first two tables (`contacts`, `projects`) are
+built, migrated, and committed. The era is now building, not designing.
 
 ---
 
@@ -33,13 +35,13 @@ and it is gated by one setup task: the Phase 4 hosted-database baseline.
 | Phase 2 | Decisions 1–10 (core patterns) | Done (design) |
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
-| **Phase 4** | **Hosted-DB migration baseline** | **NOT STARTED — the gate** |
-| Phase 3 build | Actually implementing the 20 designed sections | **NOT STARTED** |
+| Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (2 tables built)** |
 
-**The inflection point:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began
-the design era. From there to `597b32c` (~60 commits) is all architecture prose
-and doc-control. **The last feature code committed was tenant team management,
-~70 commits ago.**
+**The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
+design era; ~60 commits of architecture prose and doc-control followed. That era
+is over. The build era began with the Phase 4 baseline and the first Phase 3
+migrations (005, 006).
 
 ---
 
@@ -50,19 +52,31 @@ and doc-control. **The last feature code committed was tenant team management,
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 5** — all auth/provisioning (000_baseline through
-  004_team_admin_management). **Zero Phase 3 tables.**
+- **Migrations on disk: 7** — 000_baseline through 004_team_admin_management
+  (auth/provisioning), plus **005_contacts** and **006_projects** (first Phase 3
+  tables).
 
-Architecture sections marked **Implemented** (3): Standard RLS Pattern, Cache
-Invalidation Pattern, Schema Source-of-Truth. These describe the built foundation.
+Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
+Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
+Contacts Directory** and **Project** (built this session as 005/006).
+
+### Phase 3 tables built (as of Chat 10)
+
+- **`contacts`** (005) — Unified Contacts Directory (Item 16, Decisions 1/20).
+  10-value `contact_type` CHECK; self-referential `parent_contact_id` and
+  `linked_om_provider_id`; Standard RLS Pattern applied. Cross-row invariants
+  are app-layer (per architecture), not DB constraints.
+- **`projects`** (006) — the sacred root entity (Decisions 5/23, Item 17).
+  Multi-source trigger model with CHECK constraints; `customer_id` is a real FK
+  to `contacts(id)`; Standard RLS Pattern applied.
 
 ---
 
-## DESIGNED, NOT BUILT — locked architecture, zero code
+## DESIGNED, NOT BUILT — locked architecture, remaining sections
 
 All 28 decisions (11–28) are locked; the Cat 3 backlog is **fully resolved**.
-The following ~20 architecture sections are marked **Designed** — prose exists,
-code does not:
+The following architecture sections are marked **Designed** — prose exists, code
+does not (contacts and projects have now moved out of this list):
 
 - Claim Intake Data Model
 - ALA System (Decision 19)
@@ -81,34 +95,42 @@ code does not:
 
 ---
 
-## THE GATE — Phase 4 hosted-DB baseline (Decision 22)
+## OPEN ITEMS (tracked, not forgotten)
 
-Before any Phase 3 table is built, the hosted database needs migration history
-established. This is flagged across every handoff as a dedicated-session
-prerequisite. Key facts:
+- **`import_batches` table is undesigned.** Both `contacts` and `projects` carry
+  an `imported_via_batch_id` column whose FK to `import_batches` is **deferred**
+  — the column exists (for import provenance) but the FK CONSTRAINT is not yet
+  added. Reason: `import_batches` belongs to the data-migration subsystem
+  (Decision 8), whose MVP scope is an **open architectural question** (Phase 1
+  audit). This is blocked on a design decision, not on effort. Trail to close:
+  (1) decide data-migration MVP scope → (2) build `import_batches` → (3) add the
+  `imported_via_batch_id` FK constraint to both `contacts` and `projects` via a
+  follow-up migration. Recorded in the 005/006 commit message (`3c08e3d`).
 
-- Touches the **production database** — least-reversible operation in the project.
-- Decision 22 defines the procedure: **six gates (22.3)**, run one at a time,
-  then a **six-step repair (22.2)**. Backup first.
-- **Gate 4** requires a known-good hosted project ref and is **unrecoverable if
-  wrong** ("surgery on the wrong database"); visual inspection is explicitly NOT
-  sufficient. **STATUS (verified Chat 9): the hosted project ref is NOT stored in
-  any committed file.** config.toml has `project_id = "warrantyos"` (local CLI
-  name only), not the hosted `xxxx.supabase.co` ref. **Phase 4's FIRST task:
-  locate the correct hosted project ref from the Supabase dashboard and commit it
-  so Gate 4 has a verified, version-controlled target.**
-- **Gate 6** (drift verification via `supabase db diff`, per 22.9) is called out
-  as the most critical gate.
-- Full procedure: decisions log Decision 22; CLAUDE-rev6.md stop-point section.
+---
+
+## Phase 4 baseline — DONE
+
+The hosted-database migration baseline (Decision 22) — the gate that had to
+precede any Phase 3 table — is **complete**. Migration history is established on
+the hosted database; all Decision 22.8 transition criteria are satisfied.
+
+- Hosted project ref is recorded in `supabase/PRODUCTION-REF.md`
+  (`uzjivnmwedfzcgqnnhos`). Two decoy projects share the org — always verify the
+  linked ref before remote ops.
+- Execution record: `docs/session-handoffs/phase4-baseline-execution-record.md`.
+- The local build loop (write migration → `supabase db reset` → schema
+  generator → verify) is proven and is the standard groove for every subsequent
+  Phase 3 table.
 
 ---
 
 ## What "left to do" actually means (the build roadmap)
 
-1. **Phase 4 baseline** (the gate above) — dedicated session, backup, six gates.
-   First sub-task: store the hosted project ref (see above).
-2. **Build Phase 3 schema** — translate the 20 designed sections into migrations,
-   following the locked patterns (RLS, FK+snapshot, tenant-editable defaults).
+1. ~~Phase 4 baseline~~ — **DONE.**
+2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
+   sections into migrations, following the locked patterns (RLS, FK+snapshot,
+   tenant-editable defaults). 2 of ~20 tables built (contacts, projects).
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
    event dispatcher, the entity UIs.
 4. **Validate the prototype** — the stated goal that unlocks recruiting a
@@ -121,8 +143,8 @@ step" means code.
 
 ## How to not lose the thread again
 
-- This file is the orientation anchor. Update it when a phase completes, not
-  every commit.
+- This file is the orientation anchor. Update it when a phase or milestone
+  completes, not every commit.
 - Doc-control on the architecture docs is **maintenance, not progress** — it does
   not move the build forward. Time-box it.
 - Progress from here = migrations and code committed, not architecture prose
