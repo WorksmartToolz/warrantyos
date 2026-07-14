@@ -105,6 +105,22 @@ CREATE TABLE IF NOT EXISTS "public"."contacts" (
 ALTER TABLE "public"."contacts" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."import_batches" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "initiated_by" "uuid",
+    "source_filename" "text",
+    "project_count" integer,
+    "customer_count" integer,
+    "status" "text" DEFAULT 'completed'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "import_batches_status_check" CHECK (("status" = ANY (ARRAY['completed'::"text", 'failed'::"text", 'rolled_back'::"text"])))
+);
+
+
+ALTER TABLE "public"."import_batches" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."invitations" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -230,6 +246,11 @@ ALTER TABLE ONLY "public"."contacts"
 
 
 
+ALTER TABLE ONLY "public"."import_batches"
+    ADD CONSTRAINT "import_batches_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."invitations"
     ADD CONSTRAINT "invitations_pkey" PRIMARY KEY ("id");
 
@@ -272,6 +293,10 @@ CREATE INDEX "contacts_tenant_id_idx" ON "public"."contacts" USING "btree" ("ten
 
 
 
+CREATE INDEX "import_batches_tenant_id_idx" ON "public"."import_batches" USING "btree" ("tenant_id");
+
+
+
 CREATE INDEX "invitations_tenant_id_idx" ON "public"."invitations" USING "btree" ("tenant_id");
 
 
@@ -301,6 +326,11 @@ CREATE OR REPLACE TRIGGER "users_set_updated_at" BEFORE UPDATE ON "public"."user
 
 
 ALTER TABLE ONLY "public"."contacts"
+    ADD CONSTRAINT "contacts_imported_via_batch_id_fkey" FOREIGN KEY ("imported_via_batch_id") REFERENCES "public"."import_batches"("id");
+
+
+
+ALTER TABLE ONLY "public"."contacts"
     ADD CONSTRAINT "contacts_linked_om_provider_id_fkey" FOREIGN KEY ("linked_om_provider_id") REFERENCES "public"."contacts"("id");
 
 
@@ -312,6 +342,16 @@ ALTER TABLE ONLY "public"."contacts"
 
 ALTER TABLE ONLY "public"."contacts"
     ADD CONSTRAINT "contacts_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."import_batches"
+    ADD CONSTRAINT "import_batches_initiated_by_fkey" FOREIGN KEY ("initiated_by") REFERENCES "auth"."users"("id");
+
+
+
+ALTER TABLE ONLY "public"."import_batches"
+    ADD CONSTRAINT "import_batches_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
 
@@ -327,6 +367,11 @@ ALTER TABLE ONLY "public"."invitations"
 
 ALTER TABLE ONLY "public"."projects"
     ADD CONSTRAINT "projects_customer_id_fkey" FOREIGN KEY ("customer_id") REFERENCES "public"."contacts"("id");
+
+
+
+ALTER TABLE ONLY "public"."projects"
+    ADD CONSTRAINT "projects_imported_via_batch_id_fkey" FOREIGN KEY ("imported_via_batch_id") REFERENCES "public"."import_batches"("id");
 
 
 
@@ -349,6 +394,13 @@ ALTER TABLE "public"."contacts" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "contacts: members can view their tenant's rows" ON "public"."contacts" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."import_batches" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "import_batches: members can view their tenant's rows" ON "public"."import_batches" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -578,6 +630,12 @@ GRANT ALL ON FUNCTION "public"."get_user_tenant_id"() TO "authenticated";
 GRANT ALL ON TABLE "public"."contacts" TO "anon";
 GRANT ALL ON TABLE "public"."contacts" TO "authenticated";
 GRANT ALL ON TABLE "public"."contacts" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."import_batches" TO "anon";
+GRANT ALL ON TABLE "public"."import_batches" TO "authenticated";
+GRANT ALL ON TABLE "public"."import_batches" TO "service_role";
 
 
 
