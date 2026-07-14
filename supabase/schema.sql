@@ -183,6 +183,32 @@ CREATE TABLE IF NOT EXISTS "public"."projects" (
 ALTER TABLE "public"."projects" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."tenant_id_sequences" (
+    "tenant_id" "uuid" NOT NULL,
+    "id_type" "text" NOT NULL,
+    "format_string" "text" NOT NULL,
+    "current_year" integer NOT NULL,
+    "current_value" integer DEFAULT 0 NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "tenant_id_sequences_id_type_check" CHECK (("id_type" = ANY (ARRAY['warranty_id'::"text", 'claim_id'::"text"])))
+);
+
+
+ALTER TABLE "public"."tenant_id_sequences" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."tenant_id_sequences" IS 'Per-(tenant, id_type) gap-free identifier counters. One row per id_type per tenant. Read/updated in the same transaction as the record that consumes the id, giving the gap-free guarantee. Decision 2; architecture-reference.md ID Generation section.';
+
+
+
+COMMENT ON COLUMN "public"."tenant_id_sequences"."format_string" IS 'Python format-string syntax: {year} and {seq:NNd}. Validated at settings-save time, not generation time.';
+
+
+
+COMMENT ON COLUMN "public"."tenant_id_sequences"."current_year" IS 'UTC year the counter is currently advancing in. On first generation of a new UTC year, the increment UPDATE resets current_value to 1 and updates this.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."tenants" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "name" "text" NOT NULL,
@@ -263,6 +289,11 @@ ALTER TABLE ONLY "public"."invitations"
 
 ALTER TABLE ONLY "public"."projects"
     ADD CONSTRAINT "projects_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."tenant_id_sequences"
+    ADD CONSTRAINT "tenant_id_sequences_pkey" PRIMARY KEY ("tenant_id", "id_type");
 
 
 
@@ -380,6 +411,11 @@ ALTER TABLE ONLY "public"."projects"
 
 
 
+ALTER TABLE ONLY "public"."tenant_id_sequences"
+    ADD CONSTRAINT "tenant_id_sequences_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."users"
     ADD CONSTRAINT "users_id_fkey" FOREIGN KEY ("id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
 
@@ -415,6 +451,13 @@ ALTER TABLE "public"."projects" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "projects: members can view their tenant's rows" ON "public"."projects" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."tenant_id_sequences" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "tenant_id_sequences: members can view their tenant's rows" ON "public"."tenant_id_sequences" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -648,6 +691,12 @@ GRANT ALL ON TABLE "public"."invitations" TO "service_role";
 GRANT ALL ON TABLE "public"."projects" TO "anon";
 GRANT ALL ON TABLE "public"."projects" TO "authenticated";
 GRANT ALL ON TABLE "public"."projects" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."tenant_id_sequences" TO "anon";
+GRANT ALL ON TABLE "public"."tenant_id_sequences" TO "authenticated";
+GRANT ALL ON TABLE "public"."tenant_id_sequences" TO "service_role";
 
 
 
