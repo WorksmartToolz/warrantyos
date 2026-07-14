@@ -4,9 +4,10 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-14 (Chat 10), from verified git history and direct disk
-reads. Phase 4 baseline is complete and Phase 3 table construction has begun.
-Not from memory or handoff summaries.
+**Last built:** 2026-07-14 (Chat 11), HEAD `c195b81`, from verified git history
+and direct disk reads. Phase 4 baseline is complete and Phase 3 table
+construction is underway (five tables built). Not from memory or handoff
+summaries.
 
 ---
 
@@ -19,9 +20,10 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first three tables (`contacts`, `projects`,
-`import_batches`) are built, migrated, and committed, with all FK constraints
-between them closed. The era is now building, not designing.
+construction has started**: the first five tables (`contacts`, `projects`,
+`import_batches`, `tenant_id_sequences`, `warranty_registrations`) are built,
+migrated, and committed, with all FK constraints between them closed. The era is
+now building, not designing.
 
 ---
 
@@ -37,7 +39,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (3 tables built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (5 tables built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -53,17 +55,19 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 9** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 11** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
-  **007_import_batches**, and **008_import_batch_fks** (first Phase 3 tables and
-  the FK constraints closing them).
+  **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
+  and **010_warranty_registrations** (Phase 3 tables and the FK constraints
+  closing them).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
-Contacts Directory**, **Project**, and **Data Migration Tooling batch tracking**
-(built this session as 005–008).
+Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
+**ID Generation** (tenant_id_sequences), and **Warranty Registration** (built as
+005–010).
 
-### Phase 3 tables built (as of Chat 10)
+### Phase 3 tables built (as of Chat 11)
 
 - **`contacts`** (005) — Unified Contacts Directory (Item 16, Decisions 1/20).
   10-value `contact_type` CHECK; self-referential `parent_contact_id` and
@@ -76,6 +80,20 @@ Contacts Directory**, **Project**, and **Data Migration Tooling batch tracking**
   built exactly per its locked schema. Standard RLS Pattern applied. Migration
   008 then added the `imported_via_batch_id` FK constraints on `contacts` and
   `projects`, closing the two FKs that were briefly deferred in 005/006.
+- **`tenant_id_sequences`** (009) — per-tenant gap-free WarrantyID/ClaimID
+  generation (Decision 2; ID Generation section). Composite PK
+  `(tenant_id, id_type)`; CHECK on `id_type`; Standard RLS Pattern (SELECT by
+  tenant, writes service-role only). Backfills the two default rows for existing
+  tenants. New-tenant seeding is an app-layer provisioning step, now stated
+  explicitly in the arch ref's ID Generation section (built in the provisioning
+  Server Action work, roadmap step 3).
+- **`warranty_registrations`** (010) — parent record for one warranty agreement
+  per project (Decisions 1/5/23). 1:1 with projects via UNIQUE `project_id`,
+  ON DELETE RESTRICT; dual-FK assignee (contact OR tenant user) with XOR CHECK
+  conditional on status; four-state status machine
+  (pre_activation/assigned/active/rejected, Decision 23.7); `actual_start_date`
+  nullable (Decision 23.4). Standard RLS Pattern applied. tenant-match and
+  warranty_id immutability are app-layer invariants.
 
 ---
 
@@ -83,7 +101,8 @@ Contacts Directory**, **Project**, and **Data Migration Tooling batch tracking**
 
 All 28 decisions (11–28) are locked; the Cat 3 backlog is **fully resolved**.
 The following architecture sections are marked **Designed** — prose exists, code
-does not (contacts and projects have now moved out of this list):
+does not (contacts, projects, ID Generation, and Warranty Registration have now
+moved out of this list):
 
 - Claim Intake Data Model
 - ALA System (Decision 19)
@@ -91,7 +110,6 @@ does not (contacts and projects have now moved out of this list):
 - Service Report Submission (Decision 21)
 - Customer Work Authorization (Decision 11)
 - Work Plan Workflow (Decisions 13–16)
-- Warranty Registration lifecycle (Decision 23)
 - Warranty Type Coverages / end_date view (Decision 24)
 - Customer-O&M Authorization (Decision 28)
 - Tenant-Editable Defaults Pattern (Decision 17)
@@ -134,10 +152,12 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 3 of ~20 tables built (contacts, projects,
-   import_batches).
+   tenant-editable defaults). 5 of ~20 tables built (contacts, projects,
+   import_batches, tenant_id_sequences, warranty_registrations).
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
-   event dispatcher, the entity UIs.
+   event dispatcher, the entity UIs. (Includes the new-tenant
+   `tenant_id_sequences` provisioning seed per the arch ref's ID Generation
+   section.)
 4. **Validate the prototype** — the stated goal that unlocks recruiting a
    technical co-founder.
 
