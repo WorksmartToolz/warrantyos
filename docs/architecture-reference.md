@@ -853,9 +853,10 @@ genuinely need both over the long horizon.
 
 ## Clock Event Infrastructure
 
-**Status: Designed** (locked by Decision 9; not yet built. clock_events is a
-Phase 3 table to be migrated; pg_cron enablement and the cron handler function
-are Phase 3 build-time work. Item 17's event-type additions apply.)
+**Status: Implemented (schema)** (locked by Decision 9; clock_events table,
+CHECK constraints, three indexes, and Standard RLS built in migration 013.
+pg_cron enablement and the cron handler function remain Phase 3 build-time
+work; no Server Actions or UI yet. Item 17's event-type additions apply.)
 
 WarrantyOS has time-bound state transitions: registration prep fires a known
 lead time before a project's trigger date, an information request expires after

@@ -109,6 +109,28 @@ SET default_tablespace = '';
 SET default_table_access_method = "heap";
 
 
+CREATE TABLE IF NOT EXISTS "public"."clock_events" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "event_type" "text" NOT NULL,
+    "entity_type" "text" NOT NULL,
+    "entity_id" "uuid" NOT NULL,
+    "fires_at" timestamp with time zone NOT NULL,
+    "status" "text" DEFAULT 'pending'::"text" NOT NULL,
+    "fired_at" timestamp with time zone,
+    "failure_reason" "text",
+    "payload" "jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "clock_events_entity_type_check" CHECK (("entity_type" = ANY (ARRAY['project'::"text", 'claim'::"text", 'warranty_coverage'::"text", 'work_authorization_document'::"text", 'service_report'::"text", 'ala_document'::"text", 'warranty_registration'::"text"]))),
+    CONSTRAINT "clock_events_event_type_check" CHECK (("event_type" = ANY (ARRAY['registration_prep_pre_trigger'::"text", 'info_request_due'::"text", 'warranty_expiry_warning'::"text", 'trigger_confirmation_overdue'::"text", 'service_report_response_due'::"text", 'work_authorization_response_overdue'::"text", 'ala_decline_window_expired'::"text", 'ala_response_overdue'::"text", 'warranty_id_early_issuance'::"text"]))),
+    CONSTRAINT "clock_events_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'fired'::"text", 'cancelled'::"text", 'failed'::"text"])))
+);
+
+
+ALTER TABLE "public"."clock_events" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."contacts" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -396,6 +418,11 @@ COMMENT ON COLUMN "public"."warranty_types"."is_system" IS 'True on anchor types
 
 
 
+ALTER TABLE ONLY "public"."clock_events"
+    ADD CONSTRAINT "clock_events_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."contacts"
     ADD CONSTRAINT "contacts_pkey" PRIMARY KEY ("id");
 
@@ -466,6 +493,18 @@ ALTER TABLE ONLY "public"."warranty_types"
 
 
 
+CREATE INDEX "clock_events_entity_idx" ON "public"."clock_events" USING "btree" ("entity_type", "entity_id");
+
+
+
+CREATE INDEX "clock_events_pending_fires_at_idx" ON "public"."clock_events" USING "btree" ("fires_at") WHERE ("status" = 'pending'::"text");
+
+
+
+CREATE INDEX "clock_events_tenant_idx" ON "public"."clock_events" USING "btree" ("tenant_id");
+
+
+
 CREATE INDEX "contacts_linked_om_provider_id_idx" ON "public"."contacts" USING "btree" ("linked_om_provider_id");
 
 
@@ -515,6 +554,11 @@ CREATE OR REPLACE TRIGGER "users_set_updated_at" BEFORE UPDATE ON "public"."user
 
 
 CREATE OR REPLACE TRIGGER "warranty_types_protect_system" BEFORE DELETE OR UPDATE ON "public"."warranty_types" FOR EACH ROW EXECUTE FUNCTION "public"."protect_system_warranty_types"();
+
+
+
+ALTER TABLE ONLY "public"."clock_events"
+    ADD CONSTRAINT "clock_events_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
 
@@ -625,6 +669,13 @@ ALTER TABLE ONLY "public"."warranty_registrations"
 
 ALTER TABLE ONLY "public"."warranty_types"
     ADD CONSTRAINT "warranty_types_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE "public"."clock_events" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "clock_events: members can view their tenant's rows" ON "public"."clock_events" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -890,6 +941,12 @@ GRANT ALL ON FUNCTION "public"."get_user_tenant_id"() TO "authenticated";
 
 
 
+
+
+
+GRANT ALL ON TABLE "public"."clock_events" TO "anon";
+GRANT ALL ON TABLE "public"."clock_events" TO "authenticated";
+GRANT ALL ON TABLE "public"."clock_events" TO "service_role";
 
 
 
