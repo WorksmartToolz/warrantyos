@@ -19,8 +19,9 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first two tables (`contacts`, `projects`) are
-built, migrated, and committed. The era is now building, not designing.
+construction has started**: the first three tables (`contacts`, `projects`,
+`import_batches`) are built, migrated, and committed, with all FK constraints
+between them closed. The era is now building, not designing.
 
 ---
 
@@ -36,7 +37,7 @@ built, migrated, and committed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (2 tables built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (3 tables built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -52,13 +53,15 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 7** — 000_baseline through 004_team_admin_management
-  (auth/provisioning), plus **005_contacts** and **006_projects** (first Phase 3
-  tables).
+- **Migrations on disk: 9** — 000_baseline through 004_team_admin_management
+  (auth/provisioning), plus **005_contacts**, **006_projects**,
+  **007_import_batches**, and **008_import_batch_fks** (first Phase 3 tables and
+  the FK constraints closing them).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
-Contacts Directory** and **Project** (built this session as 005/006).
+Contacts Directory**, **Project**, and **Data Migration Tooling batch tracking**
+(built this session as 005–008).
 
 ### Phase 3 tables built (as of Chat 10)
 
@@ -69,6 +72,10 @@ Contacts Directory** and **Project** (built this session as 005/006).
 - **`projects`** (006) — the sacred root entity (Decisions 5/23, Item 17).
   Multi-source trigger model with CHECK constraints; `customer_id` is a real FK
   to `contacts(id)`; Standard RLS Pattern applied.
+- **`import_batches`** (007) — Data Migration Tooling batch tracking (Decision 8),
+  built exactly per its locked schema. Standard RLS Pattern applied. Migration
+  008 then added the `imported_via_batch_id` FK constraints on `contacts` and
+  `projects`, closing the two FKs that were briefly deferred in 005/006.
 
 ---
 
@@ -97,15 +104,12 @@ does not (contacts and projects have now moved out of this list):
 
 ## OPEN ITEMS (tracked, not forgotten)
 
-- **`import_batches` table is undesigned.** Both `contacts` and `projects` carry
-  an `imported_via_batch_id` column whose FK to `import_batches` is **deferred**
-  — the column exists (for import provenance) but the FK CONSTRAINT is not yet
-  added. Reason: `import_batches` belongs to the data-migration subsystem
-  (Decision 8), whose MVP scope is an **open architectural question** (Phase 1
-  audit). This is blocked on a design decision, not on effort. Trail to close:
-  (1) decide data-migration MVP scope → (2) build `import_batches` → (3) add the
-  `imported_via_batch_id` FK constraint to both `contacts` and `projects` via a
-  follow-up migration. Recorded in the 005/006 commit message (`3c08e3d`).
+- **None open from the Phase 3 build so far.** The `import_batches` FK deferral
+  briefly opened in 005/006 was **resolved the same session**: `import_batches`
+  was already fully specified by Decision 8 (not an open design question, as was
+  first assumed), so it was built (007) and the two `imported_via_batch_id` FK
+  constraints on `contacts` and `projects` were added (008). Committed at
+  `26133be`. No deferred FKs remain.
 
 ---
 
@@ -130,7 +134,8 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 2 of ~20 tables built (contacts, projects).
+   tenant-editable defaults). 3 of ~20 tables built (contacts, projects,
+   import_batches).
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
    event dispatcher, the entity UIs.
 4. **Validate the prototype** — the stated goal that unlocks recruiting a
