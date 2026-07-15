@@ -208,6 +208,39 @@ CREATE TABLE IF NOT EXISTS "public"."custom_field_definitions" (
 ALTER TABLE "public"."custom_field_definitions" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."custom_field_values" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "definition_id" "uuid" NOT NULL,
+    "project_id" "uuid",
+    "warranty_registration_id" "uuid",
+    "claim_id" "uuid",
+    "value" "jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "custom_field_values_one_entity_check" CHECK (((((("project_id" IS NOT NULL))::integer + (("warranty_registration_id" IS NOT NULL))::integer) + (("claim_id" IS NOT NULL))::integer) = 1))
+);
+
+
+ALTER TABLE "public"."custom_field_values" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."custom_field_values" IS 'One filled-in custom field value for one entity instance (Decision 3, Phase 2 decisions log). Companion to custom_field_definitions (015). Typed nullable FKs to the three Phase 1 entities with an exactly-one-non-null CHECK — not a polymorphic key — so referential integrity is real and ON DELETE CASCADE works per entity.';
+
+
+
+COMMENT ON COLUMN "public"."custom_field_values"."tenant_id" IS 'Denormalized per the Standard RLS Pattern''s tenant_id convention; custom_field_values is the named precedent for that convention. Avoids a JOIN through custom_field_definitions on every read. Must match the parent definition''s tenant_id — a stay-in-sync invariant enforced app-layer at insert time, not by the database.';
+
+
+
+COMMENT ON COLUMN "public"."custom_field_values"."definition_id" IS 'ON DELETE RESTRICT, not CASCADE. Definitions soft-delete via deleted_at and their values remain queryable for historical display and reporting (Decision 3). Hard-delete is admin-tooling only, never exposed in the Phase 1 UI; CASCADE would cascade-destroy auditable data, which the architecture names as the outcome to avoid.';
+
+
+
+COMMENT ON COLUMN "public"."custom_field_values"."value" IS 'Type-safe per the parent definition''s field_type, validated app-layer at write time. rich_text values are ProseMirror-compatible JSON (Decision 4) — a format named for the data, not the editor library, so it outlives TipTap.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."import_batches" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -509,6 +542,11 @@ ALTER TABLE ONLY "public"."custom_field_definitions"
 
 
 
+ALTER TABLE ONLY "public"."custom_field_values"
+    ADD CONSTRAINT "custom_field_values_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."import_batches"
     ADD CONSTRAINT "import_batches_pkey" PRIMARY KEY ("id");
 
@@ -615,6 +653,26 @@ CREATE INDEX "custom_field_definitions_tenant_id_idx" ON "public"."custom_field_
 
 
 
+CREATE INDEX "custom_field_values_claim_id_idx" ON "public"."custom_field_values" USING "btree" ("claim_id") WHERE ("claim_id" IS NOT NULL);
+
+
+
+CREATE INDEX "custom_field_values_definition_id_idx" ON "public"."custom_field_values" USING "btree" ("definition_id");
+
+
+
+CREATE INDEX "custom_field_values_project_id_idx" ON "public"."custom_field_values" USING "btree" ("project_id") WHERE ("project_id" IS NOT NULL);
+
+
+
+CREATE INDEX "custom_field_values_tenant_id_idx" ON "public"."custom_field_values" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "custom_field_values_warranty_registration_id_idx" ON "public"."custom_field_values" USING "btree" ("warranty_registration_id") WHERE ("warranty_registration_id" IS NOT NULL);
+
+
+
 CREATE INDEX "import_batches_tenant_id_idx" ON "public"."import_batches" USING "btree" ("tenant_id");
 
 
@@ -696,6 +754,31 @@ ALTER TABLE ONLY "public"."contacts"
 
 ALTER TABLE ONLY "public"."custom_field_definitions"
     ADD CONSTRAINT "custom_field_definitions_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."custom_field_values"
+    ADD CONSTRAINT "custom_field_values_claim_id_fkey" FOREIGN KEY ("claim_id") REFERENCES "public"."claims"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."custom_field_values"
+    ADD CONSTRAINT "custom_field_values_definition_id_fkey" FOREIGN KEY ("definition_id") REFERENCES "public"."custom_field_definitions"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."custom_field_values"
+    ADD CONSTRAINT "custom_field_values_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."custom_field_values"
+    ADD CONSTRAINT "custom_field_values_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."custom_field_values"
+    ADD CONSTRAINT "custom_field_values_warranty_registration_id_fkey" FOREIGN KEY ("warranty_registration_id") REFERENCES "public"."warranty_registrations"("id") ON DELETE CASCADE;
 
 
 
@@ -819,6 +902,13 @@ ALTER TABLE "public"."custom_field_definitions" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "custom_field_definitions: members can view their tenant's rows" ON "public"."custom_field_definitions" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."custom_field_values" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "custom_field_values: members can view their tenant's rows" ON "public"."custom_field_values" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -1108,6 +1198,12 @@ GRANT ALL ON TABLE "public"."contacts" TO "service_role";
 GRANT ALL ON TABLE "public"."custom_field_definitions" TO "anon";
 GRANT ALL ON TABLE "public"."custom_field_definitions" TO "authenticated";
 GRANT ALL ON TABLE "public"."custom_field_definitions" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."custom_field_values" TO "anon";
+GRANT ALL ON TABLE "public"."custom_field_values" TO "authenticated";
+GRANT ALL ON TABLE "public"."custom_field_values" TO "service_role";
 
 
 

@@ -676,11 +676,19 @@ import provenance from the start.
 
 ## Custom Field System
 
-**Status: Partially implemented (schema).** (Locked by Decision 3.
-custom_field_definitions is built in migration 015 (schema only; no Server
-Actions or UI yet). custom_field_values is not yet built -- it carries a
-required claim_id FK and claims does not yet exist; it lands with or after the
-claims shell. The rich-text field type depends on Decision 4, also locked.)
+**Status: Implemented (schema).** (Locked by Decision 3. Both tables are
+built: custom_field_definitions in migration 015, custom_field_values in
+migration 017 -- schema only; no Server Actions or UI yet. 017's claim_id FK
+was blocked until the claims shell landed (migration 016); with all three
+entity FK targets present, the exactly-one-non-null CHECK is built with real
+referential integrity and no deferred FK. ON DELETE follows the locked text
+in two directions: CASCADE on the three entity FKs, per Decision 3's stated
+rationale for typed FKs over a polymorphic key; RESTRICT on definition_id,
+because definitions soft-delete and their values must remain queryable --
+CASCADE there would be exactly the cascade-destruction of auditable data this
+section names as the outcome to avoid. The stay-in-sync tenant_id invariant
+and value type-safety are app-layer, per Decision 3. The rich-text field type
+depends on Decision 4, also locked.)
 
 Tenants need to capture data the base schema doesn't anticipate — fields that
 vary by warrantor, by workbook, by import source. The custom field system lets a
