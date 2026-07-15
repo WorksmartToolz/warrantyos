@@ -676,9 +676,11 @@ import provenance from the start.
 
 ## Custom Field System
 
-**Status: Designed** (locked by Decision 3; not yet built.
-custom_field_definitions and custom_field_values are Phase 3 tables to be
-migrated. The rich-text field type depends on Decision 4, also locked.)
+**Status: Partially implemented (schema).** (Locked by Decision 3.
+custom_field_definitions is built in migration 015 (schema only; no Server
+Actions or UI yet). custom_field_values is not yet built -- it carries a
+required claim_id FK and claims does not yet exist; it lands with or after the
+claims shell. The rich-text field type depends on Decision 4, also locked.)
 
 Tenants need to capture data the base schema doesn't anticipate — fields that
 vary by warrantor, by workbook, by import source. The custom field system lets a

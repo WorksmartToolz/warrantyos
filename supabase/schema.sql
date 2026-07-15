@@ -151,6 +151,26 @@ CREATE TABLE IF NOT EXISTS "public"."contacts" (
 ALTER TABLE "public"."contacts" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."custom_field_definitions" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "entity_type" "text" NOT NULL,
+    "label" "text" NOT NULL,
+    "field_type" "text" NOT NULL,
+    "required" boolean DEFAULT false NOT NULL,
+    "options" "jsonb",
+    "display_order" integer DEFAULT 0 NOT NULL,
+    "deleted_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "custom_field_definitions_entity_type_check" CHECK (("entity_type" = ANY (ARRAY['project'::"text", 'warranty_registration'::"text", 'claim'::"text"]))),
+    CONSTRAINT "custom_field_definitions_field_type_check" CHECK (("field_type" = ANY (ARRAY['address'::"text", 'phone'::"text", 'date'::"text", 'number'::"text", 'plain_text'::"text", 'rich_text'::"text", 'dropdown'::"text", 'email'::"text", 'url'::"text", 'checkbox'::"text", 'file_upload'::"text"])))
+);
+
+
+ALTER TABLE "public"."custom_field_definitions" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."import_batches" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -442,6 +462,11 @@ ALTER TABLE ONLY "public"."contacts"
 
 
 
+ALTER TABLE ONLY "public"."custom_field_definitions"
+    ADD CONSTRAINT "custom_field_definitions_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."import_batches"
     ADD CONSTRAINT "import_batches_pkey" PRIMARY KEY ("id");
 
@@ -536,6 +561,10 @@ CREATE INDEX "contacts_tenant_id_idx" ON "public"."contacts" USING "btree" ("ten
 
 
 
+CREATE INDEX "custom_field_definitions_tenant_id_idx" ON "public"."custom_field_definitions" USING "btree" ("tenant_id");
+
+
+
 CREATE INDEX "import_batches_tenant_id_idx" ON "public"."import_batches" USING "btree" ("tenant_id");
 
 
@@ -602,6 +631,11 @@ ALTER TABLE ONLY "public"."contacts"
 
 ALTER TABLE ONLY "public"."contacts"
     ADD CONSTRAINT "contacts_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."custom_field_definitions"
+    ADD CONSTRAINT "custom_field_definitions_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
 
@@ -711,6 +745,13 @@ ALTER TABLE "public"."contacts" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "contacts: members can view their tenant's rows" ON "public"."contacts" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."custom_field_definitions" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "custom_field_definitions: members can view their tenant's rows" ON "public"."custom_field_definitions" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -988,6 +1029,12 @@ GRANT ALL ON TABLE "public"."clock_events" TO "service_role";
 GRANT ALL ON TABLE "public"."contacts" TO "anon";
 GRANT ALL ON TABLE "public"."contacts" TO "authenticated";
 GRANT ALL ON TABLE "public"."contacts" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."custom_field_definitions" TO "anon";
+GRANT ALL ON TABLE "public"."custom_field_definitions" TO "authenticated";
+GRANT ALL ON TABLE "public"."custom_field_definitions" TO "service_role";
 
 
 
