@@ -4,9 +4,9 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-14 (Chat 11), HEAD `df19bf3`, from verified git history
+**Last built:** 2026-07-14 (Chat 12), HEAD `034eba6`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (seven tables + one view built). Not from memory or
+construction is underway (ten tables + one view built). Not from memory or
 handoff summaries.
 
 ---
@@ -20,9 +20,10 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first seven tables (`contacts`, `projects`,
+construction has started**: the first ten tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
-`warranty_types`, `warranty_coverages`) are built, migrated, and committed —
+`warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
+`custom_field_definitions`) are built, migrated, and committed —
 along with the `warranty_coverages_effective` view — with all FK constraints
 between them closed. The era is now building, not designing.
 
@@ -40,7 +41,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (7 tables + 1 view built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (10 tables + 1 view built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -56,12 +57,13 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 13** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 16** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
-  **010_warranty_registrations**, **011_warranty_types**, and
-  **012_warranty_coverages** (Phase 3 tables, the FK constraints closing them,
-  and the `warranty_coverages_effective` view).
+  **010_warranty_registrations**, **011_warranty_types**,
+  **012_warranty_coverages**, **013_clock_events**, **014_internal_teams**, and
+  **015_custom_field_definitions** (Phase 3 tables, the FK constraints closing
+  them, and the `warranty_coverages_effective` view).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
@@ -127,15 +129,17 @@ does not (contacts, projects, ID Generation, Warranty Registration, and Warranty
 Type Coverages have now moved out of this list):
 
 - Claim Intake Data Model
+- Custom Field System (Decision 3) — PARTIAL: `custom_field_definitions` built
+  (015); `custom_field_values` blocked on `claims` (needs its claim_id FK)
 - ALA System (Decision 19)
 - Inspections Foundation (Decision 17)
 - Service Report Submission (Decision 21)
 - Customer Work Authorization (Decision 11)
-- Work Plan Workflow (Decisions 13–16)
+- Work Plan Workflow (Decisions 13–16) — PARTIAL: `internal_teams` built (014);
+  `work_plans` remains
 - Customer-O&M Authorization (Decision 28)
 - Tenant-Editable Defaults Pattern (Decision 17)
 - Acknowledgment Gate Pattern (Decision 12)
-- Clock Event Infrastructure (Decisions 9, extended by 11/21/25/27)
 - Stateless Tokenized Interaction Pattern (applied, not yet coded)
 - FK + Snapshot Pattern, Feature Flag System, Database Migration Tooling, others
 
@@ -173,9 +177,10 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 7 of ~20 tables built (contacts, projects,
+   tenant-editable defaults). 10 of ~20 tables built (contacts, projects,
    import_batches, tenant_id_sequences, warranty_registrations, warranty_types,
-   warranty_coverages) plus the warranty_coverages_effective view.
+   warranty_coverages, clock_events, internal_teams, custom_field_definitions)
+   plus the warranty_coverages_effective view.
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
    event dispatcher, the entity UIs. (Includes new-tenant provisioning seeding
    for both `tenant_id_sequences` and the two `warranty_types` anchor rows, per
