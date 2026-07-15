@@ -118,6 +118,42 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   architectural intent. **All effective start/end reads MUST use the view**
   (Decision 24.3) — reading `start_date`/`term_years` directly for effective
   values is architecturally prohibited.
+- **`clock_events`** (013) — Clock Event Infrastructure (Decision 9; event-type
+  enum extended by Item 17 and Decisions 11/19/21/25/27). Backs the
+  System-Managed Clock principle: the platform manages deadlines, not reviewers.
+  Three CHECKs (`event_type` ×9, `entity_type` ×7, `status` ×4). Three indexes
+  using **Decision 9's verbatim names** rather than the RLS pattern's usual
+  `<table>_tenant_id_idx` — the locked decision names them explicitly and wins:
+  `clock_events_pending_fires_at_idx` (the load-bearing partial index on
+  `fires_at WHERE status = 'pending'`, queried hourly by the cron handler),
+  `clock_events_tenant_idx`, `clock_events_entity_idx`. No FK on `entity_id`:
+  it is a polymorphic reference resolved by `entity_type`. **Table only** —
+  pg_cron enablement and the cron handler function are separate Phase 3
+  build-time work. Only future-firing events belong here; synchronous
+  transitions live in the Server Action that caused them.
+- **`internal_teams`** (014) — tenant-defined registry of internal teams used
+  for warranty work (Decision 13). The platform commits to the operational
+  pattern (n teams per tenant) without enshrining labels: team names are tenant
+  data, **not** platform enum values (13.4). Soft-delete is required — historical
+  `work_plans` retain `internal_team_id` when teams are retired. **Deliberate
+  omissions, documented in the migration header so they are not "helpfully"
+  added later:** no `is_primary` flag (13.5 is explicit), no unique constraint on
+  `name` (never contemplated by Decision 13; the `warranty_types` case-insensitive
+  unique exists to protect Decision 6's anchor-type invariant and does **not**
+  transfer here), no membership columns (outside 13's scope).
+- **`custom_field_definitions`** (015) — tenant-defined extra fields on projects,
+  warranty registrations, and claims without a schema change (Decision 3, Phase 2
+  decisions log; `rich_text` storage format locked by Decision 4 — TipTap /
+  ProseMirror-compatible JSON). Two CHECKs: `entity_type` (the 3 Phase 1
+  entities) and `field_type` (the 11 Phase 1 types, snake_case).
+  Signature/multi-select/currency are Phase 2 and deliberately absent; extensible
+  via migration. Definitions soft-delete via `deleted_at`: existing values stay
+  queryable for historical display, the definition-list UI filters them out, and
+  new entity forms stop rendering the input. **Companion table
+  `custom_field_values` is NOT built** — it carries a required `claim_id` FK and
+  `claims` does not exist yet, so its three-way exactly-one-non-null CHECK cannot
+  be built. A real dependency boundary, not a deferral by choice: no deferred FK
+  was introduced. It lands with or after the claims shell.
 
 ---
 
