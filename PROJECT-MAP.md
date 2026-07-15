@@ -4,9 +4,9 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-14 (Chat 12), HEAD `034eba6`, from verified git history
+**Last built:** 2026-07-15 (Chat 14), HEAD `01be4d2`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (ten tables + one view built). Not from memory or
+construction is underway (eleven tables + one view built). Not from memory or
 handoff summaries.
 
 ---
@@ -20,10 +20,10 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first ten tables (`contacts`, `projects`,
+construction has started**: the first eleven tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
 `warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
-`custom_field_definitions`) are built, migrated, and committed —
+`custom_field_definitions`, `claims`) are built, migrated, and committed —
 along with the `warranty_coverages_effective` view — with all FK constraints
 between them closed. The era is now building, not designing.
 
@@ -41,7 +41,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (10 tables + 1 view built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (11 tables + 1 view built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -57,13 +57,13 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 16** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 17** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
-  **012_warranty_coverages**, **013_clock_events**, **014_internal_teams**, and
-  **015_custom_field_definitions** (Phase 3 tables, the FK constraints closing
-  them, and the `warranty_coverages_effective` view).
+  **012_warranty_coverages**, **013_clock_events**, **014_internal_teams**,
+  **015_custom_field_definitions**, and **016_claims** (Phase 3 tables, the FK
+  constraints closing them, and the `warranty_coverages_effective` view).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
@@ -150,10 +150,31 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   via migration. Definitions soft-delete via `deleted_at`: existing values stay
   queryable for historical display, the definition-list UI filters them out, and
   new entity forms stop rendering the input. **Companion table
-  `custom_field_values` is NOT built** — it carries a required `claim_id` FK and
-  `claims` does not exist yet, so its three-way exactly-one-non-null CHECK cannot
-  be built. A real dependency boundary, not a deferral by choice: no deferred FK
-  was introduced. It lands with or after the claims shell.
+  `custom_field_values` is NOT built** — but it is **no longer blocked**: it
+  carries a `claim_id` FK, and `claims` now exists (016), so all three FK
+  targets for its three-way exactly-one-non-null CHECK are present. It is the
+  natural next table and closes the Custom Field System section.
+- **`claims`** (016) — the claim shell (Tier 2): a customer's report against a
+  live warranty registration, parented one-to-many by `warranty_registrations`
+  with **ON DELETE RESTRICT** (the section's open implementation detail,
+  resolved at build time per the projects-to-registrations parallel).
+  `claim_id` is an **independent per-tenant sequence** — `CLM-{year}-{seq:07d}`
+  from `tenant_id_sequences` — **not** derived from the parent WarrantyID
+  (v1's `[WarrantyID]-C[NNNN]` form is retired). Carries Decision 27.5's
+  `is_emergency` / `emergency_stabilized_at`. Claim eligibility is
+  `warranty_id IS NOT NULL` on the parent (Decision 27.4); the emergency
+  carve-out governs filing **timing**, not eligibility (27.7).
+  **Deliberate omissions, documented in the migration header:** no UNIQUE on
+  `claim_id` (gap-freeness is the ID Generation system's transactional
+  row-lock, and `warranty_registrations.warranty_id` carries no unique
+  either), and no DB CHECK requiring `emergency_stabilized_at` when
+  `is_emergency = true` (Decision 27.6 forbids a hard platform gate on the
+  customer's own self-report — `emergency_window_exceeded` is derived, never
+  stored, and is Gate 1 reviewer judgment input; the requirement is
+  app-layer). The `status` CHECK admits only `intake_received`, the sole value
+  locked at the shell level. **Intake form fields, tokenized intake link,
+  gate-level state columns, and a claimant FK/snapshot are Tier 3 and
+  deliberately absent** — Claim Intake is a separate section.
 
 ---
 
@@ -166,7 +187,7 @@ Type Coverages have now moved out of this list):
 
 - Claim Intake Data Model
 - Custom Field System (Decision 3) — PARTIAL: `custom_field_definitions` built
-  (015); `custom_field_values` blocked on `claims` (needs its claim_id FK)
+  (015); `custom_field_values` remains (unblocked — `claims` now exists)
 - ALA System (Decision 19)
 - Inspections Foundation (Decision 17)
 - Service Report Submission (Decision 21)
@@ -213,9 +234,10 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 10 of ~20 tables built (contacts, projects,
+   tenant-editable defaults). 11 of ~20 tables built (contacts, projects,
    import_batches, tenant_id_sequences, warranty_registrations, warranty_types,
-   warranty_coverages, clock_events, internal_teams, custom_field_definitions)
+   warranty_coverages, clock_events, internal_teams, custom_field_definitions,
+   claims)
    plus the warranty_coverages_effective view.
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
    event dispatcher, the entity UIs. (Includes new-tenant provisioning seeding
