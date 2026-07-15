@@ -3273,14 +3273,28 @@ A parallel deliberate-omissions list:
 
 ## Claim (Shell)
 
-**Status: Designed at the shell level.** This section documents the claim
-entity's existence, its FK relationships, and its identifier mechanism. The
-intake data model — what fields the intake form captures, how the schema
-accommodates per-tenant variation across the six claim intake workbooks, the
-tokenized intake link mechanics, and the operational status state machine —
-is Tier 3 work, deferred to a later v2 section that depends on the workbooks
-as source material. Phase 3 table to be migrated; the schema below is the
-shell scope only.
+**Status: Implemented (schema)** (shell scope, built as migration 016). This
+section documents the claim entity's existence, its FK relationships, and its
+identifier mechanism. The intake data model — what fields the intake form
+captures, how the schema accommodates per-tenant variation across the six
+claim intake workbooks, the tokenized intake link mechanics, and the
+operational status state machine — is Tier 3 work, deferred to a later v2
+section that depends on the workbooks as source material. The shell schema
+below is built; the Tier 3 intake data model is a separate section and
+remains unbuilt.
+
+Resolved at build time (016): ON DELETE RESTRICT on
+warranty_registration_id, per the projects-to-registrations parallel this
+section suggested — the "Phase 3 implementation detail" noted under "Parent:
+warranty_registrations" is now settled. Two deliberate omissions, recorded in
+the migration header: no UNIQUE on claim_id (the gap-free guarantee lives in
+the ID Generation system's transactional row-lock, and the parallel column
+warranty_registrations.warranty_id carries no unique either), and no DB CHECK
+requiring emergency_stabilized_at when is_emergency = true (Decision 27.6
+forbids a hard platform gate on the customer's own self-report; the
+requirement is enforced at the intake form / app layer). The status CHECK
+admits only intake_received — the sole value locked at the shell level — and
+is extended by migration when the Tier 3 lifecycle section lands.
 
 A claim is the record of a customer's report against a live warranty
 registration. It is the lifecycle stage where warranty operations work

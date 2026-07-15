@@ -109,6 +109,43 @@ SET default_tablespace = '';
 SET default_table_access_method = "heap";
 
 
+CREATE TABLE IF NOT EXISTS "public"."claims" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "warranty_registration_id" "uuid" NOT NULL,
+    "claim_id" "text" NOT NULL,
+    "status" "text" DEFAULT 'intake_received'::"text" NOT NULL,
+    "is_emergency" boolean DEFAULT false NOT NULL,
+    "emergency_stabilized_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "claims_status_check" CHECK (("status" = ANY (ARRAY['intake_received'::"text"])))
+);
+
+
+ALTER TABLE "public"."claims" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."claims" IS 'Claim shell (Tier 2). A customer''s report against a live warranty registration. Intake data model, tokenized intake link, and the Six Gates status value set are Tier 3 and deliberately absent.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."claim_id" IS 'Business-visible ClaimID, generated from tenant_id_sequences (id_type = ''claim_id'', default format CLM-{year}-{seq:07d}) in the same transaction as the insert. Independent per-tenant sequence — NOT derived from the parent WarrantyID (v1''s [WarrantyID]-C[NNNN] form is retired). Immutable once set; immutability is enforced in the Server Action.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."status" IS 'Minimum locked value: intake_received. Richer values (v1 Six Gates plus outcome states) are Tier 3; the CHECK is extended by migration when that section lands.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."is_emergency" IS 'Decision 27.5. Customer-reported emergency stabilization carve-out.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."emergency_stabilized_at" IS 'Decision 27.5. Customer-reported stabilization moment; starts the 24-hour formal-filing window. Self-reported at intake, not independently verified by the platform. Required when is_emergency = true — enforced at the intake form / app layer, NOT as a DB CHECK (Decision 27.6: the 24-hour window is not a submission-blocking validation).';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."clock_events" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -452,6 +489,11 @@ COMMENT ON COLUMN "public"."warranty_types"."is_system" IS 'True on anchor types
 
 
 
+ALTER TABLE ONLY "public"."claims"
+    ADD CONSTRAINT "claims_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."clock_events"
     ADD CONSTRAINT "clock_events_pkey" PRIMARY KEY ("id");
 
@@ -537,6 +579,14 @@ ALTER TABLE ONLY "public"."warranty_types"
 
 
 
+CREATE INDEX "claims_tenant_id_idx" ON "public"."claims" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "claims_warranty_registration_id_idx" ON "public"."claims" USING "btree" ("warranty_registration_id");
+
+
+
 CREATE INDEX "clock_events_entity_idx" ON "public"."clock_events" USING "btree" ("entity_type", "entity_id");
 
 
@@ -606,6 +656,16 @@ CREATE OR REPLACE TRIGGER "users_set_updated_at" BEFORE UPDATE ON "public"."user
 
 
 CREATE OR REPLACE TRIGGER "warranty_types_protect_system" BEFORE DELETE OR UPDATE ON "public"."warranty_types" FOR EACH ROW EXECUTE FUNCTION "public"."protect_system_warranty_types"();
+
+
+
+ALTER TABLE ONLY "public"."claims"
+    ADD CONSTRAINT "claims_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."claims"
+    ADD CONSTRAINT "claims_warranty_registration_id_fkey" FOREIGN KEY ("warranty_registration_id") REFERENCES "public"."warranty_registrations"("id") ON DELETE RESTRICT;
 
 
 
@@ -731,6 +791,13 @@ ALTER TABLE ONLY "public"."warranty_registrations"
 
 ALTER TABLE ONLY "public"."warranty_types"
     ADD CONSTRAINT "warranty_types_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE "public"."claims" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "claims: members can view their tenant's rows" ON "public"."claims" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -1017,6 +1084,12 @@ GRANT ALL ON FUNCTION "public"."get_user_tenant_id"() TO "authenticated";
 
 
 
+
+
+
+GRANT ALL ON TABLE "public"."claims" TO "anon";
+GRANT ALL ON TABLE "public"."claims" TO "authenticated";
+GRANT ALL ON TABLE "public"."claims" TO "service_role";
 
 
 
