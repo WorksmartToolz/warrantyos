@@ -6130,8 +6130,9 @@ enum, the internal_team_id FK, and the new internal_teams table. Decision
 no FK relationship to Work Plan (cross-referenced here; its own section
 documents its schema). Decision 15 locks the work_plans status state
 machine at five values. Decision 16 explicitly excludes Parts Claims from
-the Work Plan Workflow scope. The two tables documented here
-(work_plans and internal_teams) are Phase 3 tables to be migrated. The
+the Work Plan Workflow scope. internal_teams is built in
+migration 014 (Implemented (schema); no Server Actions or UI yet).
+work_plans remains a Phase 3 table to be migrated. The
 operational state machine specifics (authority rules per transition,
 backward-transition handling on customer-disputed completion, etc.) belong
 to downstream operational drafting.

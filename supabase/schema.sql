@@ -167,6 +167,20 @@ CREATE TABLE IF NOT EXISTS "public"."import_batches" (
 ALTER TABLE "public"."import_batches" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."internal_teams" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "description" "text",
+    "deleted_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."internal_teams" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."invitations" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -433,6 +447,11 @@ ALTER TABLE ONLY "public"."import_batches"
 
 
 
+ALTER TABLE ONLY "public"."internal_teams"
+    ADD CONSTRAINT "internal_teams_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."invitations"
     ADD CONSTRAINT "invitations_pkey" PRIMARY KEY ("id");
 
@@ -521,6 +540,10 @@ CREATE INDEX "import_batches_tenant_id_idx" ON "public"."import_batches" USING "
 
 
 
+CREATE INDEX "internal_teams_tenant_id_idx" ON "public"."internal_teams" USING "btree" ("tenant_id");
+
+
+
 CREATE INDEX "invitations_tenant_id_idx" ON "public"."invitations" USING "btree" ("tenant_id");
 
 
@@ -589,6 +612,11 @@ ALTER TABLE ONLY "public"."import_batches"
 
 ALTER TABLE ONLY "public"."import_batches"
     ADD CONSTRAINT "import_batches_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."internal_teams"
+    ADD CONSTRAINT "internal_teams_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
 
@@ -690,6 +718,13 @@ ALTER TABLE "public"."import_batches" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "import_batches: members can view their tenant's rows" ON "public"."import_batches" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."internal_teams" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "internal_teams: members can view their tenant's rows" ON "public"."internal_teams" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -959,6 +994,12 @@ GRANT ALL ON TABLE "public"."contacts" TO "service_role";
 GRANT ALL ON TABLE "public"."import_batches" TO "anon";
 GRANT ALL ON TABLE "public"."import_batches" TO "authenticated";
 GRANT ALL ON TABLE "public"."import_batches" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."internal_teams" TO "anon";
+GRANT ALL ON TABLE "public"."internal_teams" TO "authenticated";
+GRANT ALL ON TABLE "public"."internal_teams" TO "service_role";
 
 
 
