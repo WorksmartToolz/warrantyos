@@ -606,6 +606,72 @@ COMMENT ON COLUMN "public"."warranty_types"."is_system" IS 'True on anchor types
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."work_plans" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "claim_id" "uuid" NOT NULL,
+    "execution_path" "text" NOT NULL,
+    "internal_team_id" "uuid",
+    "subcontractor_contact_id" "uuid",
+    "subcontractor_name_snapshot" "text",
+    "subcontractor_email_snapshot" "text",
+    "subcontractor_phone_snapshot" "text",
+    "warranty_professional_user_id" "uuid" NOT NULL,
+    "work_plan_type" "text" NOT NULL,
+    "status" "text" DEFAULT 'draft'::"text" NOT NULL,
+    "planned_start_at" timestamp with time zone NOT NULL,
+    "planned_end_at" timestamp with time zone NOT NULL,
+    "crew_size" integer NOT NULL,
+    "corrective_actions" "jsonb" NOT NULL,
+    "required_materials_equipment" "jsonb",
+    "repair_scope_approach" "jsonb" NOT NULL,
+    "safety_considerations" "jsonb",
+    "site_access_coordination" "jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "work_plans_execution_path_check" CHECK (("execution_path" = ANY (ARRAY['warrantor_self_performs'::"text", 'scope_owned_subcontractor'::"text", 'outsourced_subcontractor'::"text", 'customer_self_services'::"text"]))),
+    CONSTRAINT "work_plans_internal_team_path_check" CHECK (((("execution_path" = 'warrantor_self_performs'::"text") AND ("internal_team_id" IS NOT NULL)) OR (("execution_path" <> 'warrantor_self_performs'::"text") AND ("internal_team_id" IS NULL)))),
+    CONSTRAINT "work_plans_status_check" CHECK (("status" = ANY (ARRAY['draft'::"text", 'sent_for_authorization'::"text", 'authorized'::"text", 'completed'::"text", 'cancelled'::"text"]))),
+    CONSTRAINT "work_plans_subcontractor_path_check" CHECK (((("execution_path" = ANY (ARRAY['scope_owned_subcontractor'::"text", 'outsourced_subcontractor'::"text"])) AND ("subcontractor_contact_id" IS NOT NULL)) OR (("execution_path" <> ALL (ARRAY['scope_owned_subcontractor'::"text", 'outsourced_subcontractor'::"text"])) AND ("subcontractor_contact_id" IS NULL)))),
+    CONSTRAINT "work_plans_work_plan_type_check" CHECK (("work_plan_type" = ANY (ARRAY['repair'::"text", 'inspection'::"text", 'both'::"text"])))
+);
+
+
+ALTER TABLE "public"."work_plans" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."work_plans" IS 'The warrantor''s INTENT: the planned corrective actions for a claim (Decisions 13/15/16; SOP 6). Customer Work Authorization (Decision 11) is the customer-facing COMMITMENT generated from this intent — the two entities are deliberately separate. One-to-many with claims: each Work Plan bounds one execution event, and a claim may have many across its lifecycle. Parts Claims (claim_type = replacement_parts) do NOT flow through this workflow per Decision 16.3; their fulfillment is a separate future architecture.';
+
+
+
+COMMENT ON COLUMN "public"."work_plans"."execution_path" IS 'v1''s Four Work Plan Execution Paths, platform-locked (Decision 13.2). warrantor_self_performs: an internal team executes. scope_owned_subcontractor: the original installer with an active warranty obligation executes (v1 Path 2A). outsourced_subcontractor: a third party procured via RFQ executes (v1 Path 2B). customer_self_services: the customer executes with warrantor reimbursement (v1 Path 3). Extensible via migration if a fifth path surfaces operationally.';
+
+
+
+COMMENT ON COLUMN "public"."work_plans"."internal_team_id" IS 'The specific internal team executing, when execution_path = warrantor_self_performs (Decision 13.1). Team labels are tenant data, NOT platform enum values (13.4). ON DELETE RESTRICT is the only architecturally available clause: Decision 13.3 requires soft-delete precisely so historical work_plans retain this FK when teams retire — CASCADE would destroy those rows, and SET NULL would violate work_plans_internal_team_path_check.';
+
+
+
+COMMENT ON COLUMN "public"."work_plans"."subcontractor_contact_id" IS 'The executing subcontractor, when execution_path is scope_owned_subcontractor or outsourced_subcontractor (Decision 13.1). FK + Snapshot Pattern, single-FK shape. Single-FK rather than the dual-FK shape Service Report uses for its submitter: execution_path already disambiguates who executes, so the assignee capture splits cleanly by path and needs no column accepting either a contact or a user.';
+
+
+
+COMMENT ON COLUMN "public"."work_plans"."warranty_professional_user_id" IS 'The tenant user managing this Work Plan from the warrantor''s side — the workbook''s "Warrantor Contact". Always populated regardless of execution_path. The workbook''s Name/Phone/Email fields resolve through this FK''s joined user record rather than as redundant columns.';
+
+
+
+COMMENT ON COLUMN "public"."work_plans"."work_plan_type" IS 'Whether this Work Plan covers repair work, inspection work, or both. From the Work Plan Data Inputs workbook''s "Work Plan Type" dropdown. The relationship between work_plan_type = both and Customer Work Authorization''s event_type (one bundled document vs two separate documents) is a downstream operational question, not locked here.';
+
+
+
+COMMENT ON COLUMN "public"."work_plans"."status" IS 'Five-value state machine (Decision 15.1): draft (authored, customer cannot see it) -> sent_for_authorization (bundled into a Customer Work Authorization and sent; stays here across the Work Authorization''s own revision cycles per 15.5) -> authorized (a Work Authorization for this plan was customer-approved) -> completed (a Service Report exists for the claim). cancelled is terminal for abandoned plans. Transitions run through Server Actions, never direct UPDATE. Deliberately absent: submitted (15.2), in_execution (15.3), a scheduling state (15.4), revised/resent (15.5).';
+
+
+
+COMMENT ON COLUMN "public"."work_plans"."planned_end_at" IS 'SOP 6 component 6 (Estimated Duration) is captured as the planned_start_at / planned_end_at pair rather than a duration scalar, mirroring Customer Work Authorization (Decision 11) so fields replicate cleanly when a Work Authorization is generated from this plan. The workbook''s "Number of Days to Complete" is derivable from the difference.';
+
+
+
 ALTER TABLE ONLY "public"."claims"
     ADD CONSTRAINT "claims_pkey" PRIMARY KEY ("id");
 
@@ -711,6 +777,11 @@ ALTER TABLE ONLY "public"."warranty_types"
 
 
 
+ALTER TABLE ONLY "public"."work_plans"
+    ADD CONSTRAINT "work_plans_pkey" PRIMARY KEY ("id");
+
+
+
 CREATE INDEX "claims_tenant_id_idx" ON "public"."claims" USING "btree" ("tenant_id");
 
 
@@ -804,6 +875,14 @@ CREATE INDEX "users_tenant_id_idx" ON "public"."users" USING "btree" ("tenant_id
 
 
 CREATE UNIQUE INDEX "warranty_types_tenant_name_lower_unique" ON "public"."warranty_types" USING "btree" ("tenant_id", "lower"("name"));
+
+
+
+CREATE INDEX "work_plans_claim_id_idx" ON "public"."work_plans" USING "btree" ("claim_id");
+
+
+
+CREATE INDEX "work_plans_tenant_id_idx" ON "public"."work_plans" USING "btree" ("tenant_id");
 
 
 
@@ -989,6 +1068,31 @@ ALTER TABLE ONLY "public"."warranty_types"
 
 
 
+ALTER TABLE ONLY "public"."work_plans"
+    ADD CONSTRAINT "work_plans_claim_id_fkey" FOREIGN KEY ("claim_id") REFERENCES "public"."claims"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."work_plans"
+    ADD CONSTRAINT "work_plans_internal_team_id_fkey" FOREIGN KEY ("internal_team_id") REFERENCES "public"."internal_teams"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."work_plans"
+    ADD CONSTRAINT "work_plans_subcontractor_contact_id_fkey" FOREIGN KEY ("subcontractor_contact_id") REFERENCES "public"."contacts"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."work_plans"
+    ADD CONSTRAINT "work_plans_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."work_plans"
+    ADD CONSTRAINT "work_plans_warranty_professional_user_id_fkey" FOREIGN KEY ("warranty_professional_user_id") REFERENCES "public"."users"("id") ON DELETE RESTRICT;
+
+
+
 ALTER TABLE "public"."claims" ENABLE ROW LEVEL SECURITY;
 
 
@@ -1113,6 +1217,13 @@ ALTER TABLE "public"."warranty_types" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "warranty_types: members can view their tenant's rows" ON "public"."warranty_types" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."work_plans" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "work_plans: members can view their tenant's rows" ON "public"."work_plans" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -1408,6 +1519,12 @@ GRANT ALL ON TABLE "public"."warranty_coverages_effective" TO "service_role";
 GRANT ALL ON TABLE "public"."warranty_types" TO "anon";
 GRANT ALL ON TABLE "public"."warranty_types" TO "authenticated";
 GRANT ALL ON TABLE "public"."warranty_types" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."work_plans" TO "anon";
+GRANT ALL ON TABLE "public"."work_plans" TO "authenticated";
+GRANT ALL ON TABLE "public"."work_plans" TO "service_role";
 
 
 

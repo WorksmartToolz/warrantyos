@@ -6146,20 +6146,30 @@ Parallel to the deliberate-omissions lists elsewhere:
 
 ## Work Plan Workflow
 
-**Status: Designed at the architectural level.** This is the largest Tier 3
-section, depending on substantial pre-triage work resolved in Decisions 13,
-14, 15, and 16 (Phase 3 decisions log). Decision 13 locks the execution_path
-enum, the internal_team_id FK, and the new internal_teams table. Decision
-14 locks the Notice of Defect entity as a separate claim-child entity with
-no FK relationship to Work Plan (cross-referenced here; its own section
-documents its schema). Decision 15 locks the work_plans status state
-machine at five values. Decision 16 explicitly excludes Parts Claims from
-the Work Plan Workflow scope. internal_teams is built in
-migration 014 (Implemented (schema); no Server Actions or UI yet).
-work_plans remains a Phase 3 table to be migrated. The
-operational state machine specifics (authority rules per transition,
-backward-transition handling on customer-disputed completion, etc.) belong
-to downstream operational drafting.
+**Status: Implemented (schema).** This is the largest Tier 3 section,
+depending on substantial pre-triage work resolved in Decisions 13, 14, 15,
+and 16 (Phase 3 decisions log). Decision 13 locks the execution_path enum,
+the internal_team_id FK, and the new internal_teams table. Decision 14 locks
+the Notice of Defect entity as a separate claim-child entity with no FK
+relationship to Work Plan (cross-referenced here; its own section documents
+its schema, and it remains unbuilt -- it is a separate section, not an
+unbuilt sibling within this one). Decision 15 locks the work_plans status
+state machine at five values. Decision 16 explicitly excludes Parts Claims
+from the Work Plan Workflow scope. Both of this section's tables are built:
+internal_teams in migration 014 and work_plans in migration 020, the latter
+carrying all five CHECKs (execution_path, work_plan_type, status, and the
+two conditional path CHECKs Decision 13.1 requires) and the Standard RLS
+Pattern's six steps. No Server Actions or UI yet for either. ON DELETE was
+resolved at build time on all four of work_plans' entity FKs -- claim_id,
+internal_team_id, subcontractor_contact_id, warranty_professional_user_id --
+as RESTRICT, closing four of the Outstanding architectural questions below;
+on internal_team_id RESTRICT is the only architecturally available clause,
+since Decision 13.3 requires soft-delete precisely so historical work_plans
+retain the FK when teams retire (CASCADE would destroy those rows; SET NULL
+would violate the conditional CHECK). The operational state machine
+specifics (authority rules per transition, backward-transition handling on
+customer-disputed completion, etc.) belong to downstream operational
+drafting.
 
 A Work Plan is the document detailing the corrective actions the warrantor
 or executing subcontractor intends to perform to address a claim. SOP 6
