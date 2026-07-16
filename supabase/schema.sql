@@ -657,6 +657,119 @@ COMMENT ON COLUMN "public"."warranty_types"."is_system" IS 'True on anchor types
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."work_authorization_documents" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "claim_id" "uuid" NOT NULL,
+    "template_id" "uuid" NOT NULL,
+    "template_snapshot" "jsonb" NOT NULL,
+    "event_type" "text" NOT NULL,
+    "event_reference_id" "uuid",
+    "status" "text" DEFAULT 'draft'::"text" NOT NULL,
+    "expected_response_date" "date",
+    "requestor_name" "text" NOT NULL,
+    "requestor_company" "text" NOT NULL,
+    "requestor_phone" "text",
+    "requestor_email" "text" NOT NULL,
+    "planned_start_at" timestamp with time zone NOT NULL,
+    "planned_end_at" timestamp with time zone NOT NULL,
+    "crew_size" integer NOT NULL,
+    "sow_activities" "jsonb" NOT NULL,
+    "om_provider_company" "text",
+    "om_contact_name" "text",
+    "om_contact_phone" "text",
+    "om_contact_email" "text",
+    "site_emergency_address" "jsonb",
+    "site_accessibility_date" "date",
+    "operating_hours" "text",
+    "special_access_required" boolean,
+    "special_access_details" "jsonb",
+    "gate_code_needed" boolean,
+    "gate_code_details" "jsonb",
+    "customer_comments" "jsonb",
+    "customer_decision" "text",
+    "denial_explanation" "jsonb",
+    "signer_name_typed" "text",
+    "authorization_acknowledged" boolean,
+    "request_completed_by_name" "text",
+    "customer_token" "text",
+    "customer_token_expires_at" timestamp with time zone,
+    "requested_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "responded_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "work_authorization_documents_customer_decision_check" CHECK (("customer_decision" = ANY (ARRAY['approved'::"text", 'denied'::"text"]))),
+    CONSTRAINT "work_authorization_documents_event_type_check" CHECK (("event_type" = ANY (ARRAY['inspection'::"text", 'repair_work'::"text", 'site_visit'::"text"]))),
+    CONSTRAINT "work_authorization_documents_status_check" CHECK (("status" = ANY (ARRAY['draft'::"text", 'sent'::"text", 'approved'::"text", 'denied'::"text", 'revised'::"text", 'resent'::"text", 'withdrawn'::"text"])))
+);
+
+
+ALTER TABLE "public"."work_authorization_documents" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."work_authorization_documents" IS 'One customer authorization for one bounded on-site event (Decision 11). The customer-facing COMMITMENT generated from a Work Plan''s INTENT. Universal blocking gate: no on-site activity proceeds without an approved document for that specific event -- broader than SOP 1''s inspection-only language, which the architecture treats as the canonical instance, not the limit. One-to-many with claims: each document bounds one event, and a claim may have many across its lifecycle. Contrast ala_documents and service_reports, which are UNIQUE per claim because they bound the claim as a whole.';
+
+
+
+COMMENT ON COLUMN "public"."work_authorization_documents"."event_reference_id" IS 'Polymorphic reference to the authorized event: inspections.id when event_type = ''inspection'', work_plans.id when ''repair_work''. NO database FK -- Decision 11 locks the two-column (event_type + event_reference_id) shape, and typed per-event FK columns would delete this locked column. Precedent: clock_events.entity_id. Dispatch and referential integrity are app-layer; the application must check for active authorizations before allowing a referenced event entity to be deleted.';
+
+
+
+COMMENT ON COLUMN "public"."work_authorization_documents"."status" IS 'Seven-value state machine. draft (warrantor authoring; customer cannot see it) -> sent (tokenized link emailed) -> approved (terminal happy path; on-site activity authorized) | denied (triggers revise-and-resend) -> revised (warrantor edited the denied document) -> resent (customer decides again, seeing the full revision history) | withdrawn (request scrapped entirely; fallback for denials not recoverable through revision). Transitions run through Server Actions. Authority rules per transition are operational and deferred.';
+
+
+
+COMMENT ON COLUMN "public"."work_authorization_documents"."authorization_acknowledged" IS 'The "I authorize" checkbox. Together with signer_name_typed this is the signature artifact constituting legal approval. Deliberately distinct from ALA''s mechanism (Decision 19''s Accept/Decline + atomic signature + recant window): ALA''s assumption of financial liability warrants that ceremony, while authorizing on-site activity fits typed-name-plus-checkbox atomicity. Neither pre-decides the other.';
+
+
+
+COMMENT ON COLUMN "public"."work_authorization_documents"."customer_token" IS 'Fifth canonical use of the Stateless Tokenized Interaction Pattern, after claim intake, registration assignee submission, supply-only delivery reporting, and service report customer review. Stored on this row per the pattern''s "shape to copy, not shared store" rule. When a tenant configures an Acknowledgment Gate for gate_purpose = ''work_authorization'' (Decision 12), that gate is an interstitial on THIS token -- there is no second token.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."work_authorization_revisions" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "work_authorization_document_id" "uuid" NOT NULL,
+    "revised_by_user_id" "uuid" NOT NULL,
+    "revision_reason" "jsonb" NOT NULL,
+    "field_changes" "jsonb" NOT NULL,
+    "revised_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."work_authorization_revisions" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."work_authorization_revisions" IS 'Full history of warrantor edits to one Work Authorization document (Decision 11). Revise-and-resend is the PRIMARY recovery path for a denied authorization -- not withdraw-and-recreate. The document''s id, claim_id, and event_reference_id stay the same; the same request evolves through revisions until approved or withdrawn. The customer sees the full revision history transparently on resend (Option A in Decision 11: transparency for trust-building and audit-defensibility; burying the history was rejected). Built verbatim to the locked sketch: revised_at only, no created_at/updated_at, no soft-delete.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."work_authorization_templates" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "warrantor_field_config" "jsonb" NOT NULL,
+    "customer_field_config" "jsonb" NOT NULL,
+    "legal_language" "jsonb" NOT NULL,
+    "is_default" boolean DEFAULT false NOT NULL,
+    "deleted_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."work_authorization_templates" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."work_authorization_templates" IS 'Tenant-defined reusable configuration for Customer Work Authorization (Decision 11). Same templates-and-documents shape as the ALA System and the Acknowledgment Gate Pattern. Soft-delete is required, not optional: retired templates must remain queryable because documents generated from them reference template_id for reporting.';
+
+
+
+COMMENT ON COLUMN "public"."work_authorization_templates"."is_default" IS 'At most one is_default = true per tenant is the architectural intent. Enforcement is app-layer: the arch ref offers partial-UNIQUE or app-layer and picks neither, and Decision 17.A.6 caps v1 DB enforcement. Parallel to ALA''s and Acknowledgment Gate''s is_default flags.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."work_plans" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -833,6 +946,21 @@ ALTER TABLE ONLY "public"."warranty_types"
 
 
 
+ALTER TABLE ONLY "public"."work_authorization_documents"
+    ADD CONSTRAINT "work_authorization_documents_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."work_authorization_revisions"
+    ADD CONSTRAINT "work_authorization_revisions_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."work_authorization_templates"
+    ADD CONSTRAINT "work_authorization_templates_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."work_plans"
     ADD CONSTRAINT "work_plans_pkey" PRIMARY KEY ("id");
 
@@ -939,6 +1067,34 @@ CREATE INDEX "users_tenant_id_idx" ON "public"."users" USING "btree" ("tenant_id
 
 
 CREATE UNIQUE INDEX "warranty_types_tenant_name_lower_unique" ON "public"."warranty_types" USING "btree" ("tenant_id", "lower"("name"));
+
+
+
+CREATE INDEX "work_authorization_documents_claim_id_idx" ON "public"."work_authorization_documents" USING "btree" ("claim_id");
+
+
+
+CREATE INDEX "work_authorization_documents_event_reference_idx" ON "public"."work_authorization_documents" USING "btree" ("event_type", "event_reference_id");
+
+
+
+CREATE INDEX "work_authorization_documents_template_id_idx" ON "public"."work_authorization_documents" USING "btree" ("template_id");
+
+
+
+CREATE INDEX "work_authorization_documents_tenant_id_idx" ON "public"."work_authorization_documents" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "work_authorization_revisions_document_id_idx" ON "public"."work_authorization_revisions" USING "btree" ("work_authorization_document_id");
+
+
+
+CREATE INDEX "work_authorization_revisions_tenant_id_idx" ON "public"."work_authorization_revisions" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "work_authorization_templates_tenant_id_idx" ON "public"."work_authorization_templates" USING "btree" ("tenant_id");
 
 
 
@@ -1152,6 +1308,41 @@ ALTER TABLE ONLY "public"."warranty_types"
 
 
 
+ALTER TABLE ONLY "public"."work_authorization_documents"
+    ADD CONSTRAINT "work_authorization_documents_claim_id_fkey" FOREIGN KEY ("claim_id") REFERENCES "public"."claims"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."work_authorization_documents"
+    ADD CONSTRAINT "work_authorization_documents_template_id_fkey" FOREIGN KEY ("template_id") REFERENCES "public"."work_authorization_templates"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."work_authorization_documents"
+    ADD CONSTRAINT "work_authorization_documents_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."work_authorization_revisions"
+    ADD CONSTRAINT "work_authorization_revisions_revised_by_user_id_fkey" FOREIGN KEY ("revised_by_user_id") REFERENCES "public"."users"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."work_authorization_revisions"
+    ADD CONSTRAINT "work_authorization_revisions_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."work_authorization_revisions"
+    ADD CONSTRAINT "work_authorization_revisions_work_authorization_document_i_fkey" FOREIGN KEY ("work_authorization_document_id") REFERENCES "public"."work_authorization_documents"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."work_authorization_templates"
+    ADD CONSTRAINT "work_authorization_templates_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
 ALTER TABLE ONLY "public"."work_plans"
     ADD CONSTRAINT "work_plans_claim_id_fkey" FOREIGN KEY ("claim_id") REFERENCES "public"."claims"("id") ON DELETE RESTRICT;
 
@@ -1308,6 +1499,27 @@ ALTER TABLE "public"."warranty_types" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "warranty_types: members can view their tenant's rows" ON "public"."warranty_types" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."work_authorization_documents" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "work_authorization_documents: tenant read" ON "public"."work_authorization_documents" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."work_authorization_revisions" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "work_authorization_revisions: tenant read" ON "public"."work_authorization_revisions" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."work_authorization_templates" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "work_authorization_templates: tenant read" ON "public"."work_authorization_templates" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -1616,6 +1828,24 @@ GRANT ALL ON TABLE "public"."warranty_coverages_effective" TO "service_role";
 GRANT ALL ON TABLE "public"."warranty_types" TO "anon";
 GRANT ALL ON TABLE "public"."warranty_types" TO "authenticated";
 GRANT ALL ON TABLE "public"."warranty_types" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."work_authorization_documents" TO "anon";
+GRANT ALL ON TABLE "public"."work_authorization_documents" TO "authenticated";
+GRANT ALL ON TABLE "public"."work_authorization_documents" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."work_authorization_revisions" TO "anon";
+GRANT ALL ON TABLE "public"."work_authorization_revisions" TO "authenticated";
+GRANT ALL ON TABLE "public"."work_authorization_revisions" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."work_authorization_templates" TO "anon";
+GRANT ALL ON TABLE "public"."work_authorization_templates" TO "authenticated";
+GRANT ALL ON TABLE "public"."work_authorization_templates" TO "service_role";
 
 
 

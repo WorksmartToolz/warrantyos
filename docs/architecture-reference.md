@@ -5536,20 +5536,35 @@ Parallel to the deliberate-omissions lists elsewhere:
 
 ## Customer Work Authorization
 
-**Status: Designed at the architectural level.** Decision 11 (Phase 3
+**Status: Implemented (schema).** Decision 11 (Phase 3
 decisions log) is the locked architectural specification for this entity,
 including the three-table parent-child-revisions shape, the seven-value
 status state machine, the five locked commitments, and the cross-entity
 dependencies. Decision 12 (Acknowledgment Gate Pattern, Tier 1) is the
-locked source for the gate cross-reference noted below. The three tables
+locked source for the gate cross-reference noted below. All three tables
 (work_authorization_templates, work_authorization_documents,
-work_authorization_revisions) are Phase 3 tables to be migrated. One open
-architectural question — the polymorphic event_reference_id FK shape
-(11b) — is deferred to Phase 3 implementation and flagged below. The
-operational state machine specifics (which Server Actions transition
-which status values under which conditions, the precise authority model
-for who can revise versus withdraw) belong to downstream operational
-drafting; this section locks the architecture, not the workflow.
+work_authorization_revisions) are built in migration 022, with the
+Standard RLS Pattern's six steps on each, three CHECKs on documents
+(event_type, status, customer_decision), and seven indexes. The
+polymorphic event_reference_id FK shape (11b) was resolved at build time
+as the single nullable column with application-layer dispatch — the only
+candidate that preserves the two-column shape Decision 11 locks by name;
+see the resolved entry below. ON DELETE was resolved at build time on all
+five FKs: RESTRICT on claim_id, template_id, and revised_by_user_id;
+CASCADE on revisions.work_authorization_document_id (a revision is a
+dependent attribute of its document, not an independent record); no
+clause on event_reference_id, which carries no FK. Deliberately app-layer
+per Decision 17.A.6's cap on v1 DB enforcement: the at-most-one-default
+invariant on templates, the denial_explanation and signature-artifact
+conditionals, and the special_access / gate_code conditionals. No Server
+Actions or UI yet — the universal blocking gate, the tokenized customer
+response, the revise-and-resend mechanic, and the
+work_authorization_response_overdue clock event scheduling are all
+unbuilt. The operational state machine specifics (which Server Actions
+transition which status values under which conditions, the precise
+authority model for who can revise versus withdraw) belong to downstream
+operational drafting; this section locks the architecture, not the
+workflow.
 
 A Customer Work Authorization is the document a warrantor sends to a
 customer to obtain explicit approval before warranty personnel — or
@@ -6069,18 +6084,27 @@ Real cross-entity dependencies, deferred or resolved:
 
 Flagged for downstream / Phase 3 implementation:
 
-- Polymorphic event_reference_id FK shape (Decision 11.b). The
-  event_reference_id column references different target tables per
-  event_type (inspections.id when event_type = 'inspection', the
-  work plan entity's id when 'repair_work', future types' rows for
-  future event_type values). Whether this is implemented as a single
-  nullable column with application-layer dispatch by event_type,
-  separate event-type-specific FK columns (e.g., inspection_id,
-  work_plan_id, with a CHECK enforcing alignment with event_type),
-  or a junction table is a Phase 3 implementation detail. Decision
-  11 locks the two-column shape (event_type + event_reference_id);
-  the mechanics are downstream. Same restraint as the polymorphic
-  FK question in the Acknowledgment Gate Pattern section.
+- Polymorphic event_reference_id FK shape (Decision 11.b).
+  RESOLVED at build time in migration 022: the single nullable column
+  with application-layer dispatch by event_type. The three candidates
+  were the single nullable column, separate event-type-specific FK
+  columns (inspection_id, work_plan_id, with a CHECK enforcing
+  alignment), and a junction table. The junction table is doubly
+  excluded — it eliminates the locked event_reference_id column and
+  supports many-to-many, which this section's own "No
+  multi-event-per-document" omission forbids. Separate typed FK columns
+  would give real referential integrity, and custom_field_values
+  (migration 017) is a genuine precedent for preferring typed FKs over
+  a polymorphic key per Decision 3 — but that shape deletes
+  event_reference_id, the column Decision 11 locks by name. 017's
+  precedent does not transfer: Decision 3 chose typed FKs where no
+  locked column name was at stake. The single nullable column preserves
+  the locked two-column shape verbatim, and has direct in-repo
+  precedent in clock_events.entity_id (migration 013), which carries no
+  FK and is resolved by entity_type. Referential integrity and dispatch
+  are application-layer, as the ON DELETE entry below anticipates. The
+  parallel polymorphic FK question in the Acknowledgment Gate Pattern
+  section remains open on its own terms.
 - ON DELETE behavior on claim_id. Parallel to other claim-child FK
   flags across v2; the architectural restraint suggests RESTRICT
   with soft-delete as the cleanup path, but the specific clause is
