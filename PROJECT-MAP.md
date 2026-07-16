@@ -4,9 +4,9 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-15 (Chat 15), HEAD `61b3056`, from verified git history
+**Last built:** 2026-07-16 (Chat 16), HEAD `56dc7fe`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (fifteen tables + one view built). Not from memory or
+construction is underway (sixteen tables + one view built). Not from memory or
 handoff summaries.
 
 ---
@@ -20,12 +20,12 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first fifteen tables (`contacts`, `projects`,
+construction has started**: the first sixteen tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
 `warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
 `custom_field_definitions`, `claims`, `custom_field_values`,
-`inspection_types`, `inspection_triggers`, `work_plans`) are built,
-migrated, and committed —
+`inspection_types`, `inspection_triggers`, `work_plans`, `inspections`) are
+built, migrated, and committed —
 along with the `warranty_coverages_effective` view — with all FK constraints
 between them closed. The era is now building, not designing.
 
@@ -43,7 +43,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (15 tables + 1 view built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (16 tables + 1 view built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -59,15 +59,16 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 21** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 22** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
   **012_warranty_coverages**, **013_clock_events**, **014_internal_teams**,
   **015_custom_field_definitions**, **016_claims**,
   **017_custom_field_values**, **018_inspection_types**,
-  **019_inspection_triggers**, and **020_work_plans** (Phase 3 tables, the FK
-  constraints closing them, and the `warranty_coverages_effective` view).
+  **019_inspection_triggers**, **020_work_plans**, and **021_inspections**
+  (Phase 3 tables, the FK constraints closing them, and the
+  `warranty_coverages_effective` view).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
@@ -260,6 +261,59 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   values (excluded by 15.2, 15.3, 15.4, 15.5 respectively). Parts Claims are
   excluded from this workflow entirely (Decision 16.3) — app-layer, not a DB
   constraint coupling this table to the parent's `claim_type`.
+- **`inspections`** (021) — claim-level investigations into a defect's cause,
+  scope, or fix (Decision 17 Part B, Decision 18). Used when a claim's
+  information is insufficient to determine corrective actions, or when an
+  Indistinct claim needs investigation before warranty determination. Zero,
+  one, or many per claim — **no UNIQUE on `claim_id`** (an initial internal
+  inspection may be followed by a third-party expert inspection if the first is
+  inconclusive). **The canonical reference example for the Tenant-Editable
+  Defaults role-based decision tree:** five enum-like columns spanning three
+  patterns — `performed_by` and `paid_by` are platform-locked CHECK enums
+  (structural axes: universal across warrantor business models, driving
+  authority checks and cost-recovery routing), `inspection_type` and
+  `inspection_trigger` are Tenant-Editable Defaults (categorization: values vary
+  by tenant vocabulary), and `status` is a platform-locked CHECK enum
+  (workflow-driver: platform code branches on it). Future v2 entities with
+  multiple enum-like columns follow the same per-column reasoning rather than
+  picking one uniform pattern — **do not harmonize these.** **Completes step 4
+  of the Tenant-Editable Defaults six-step convention:** both FK + value
+  snapshot column pairs, in the shape the pattern's "Operational table
+  integration via FK + Snapshot" subsection specifies. Snapshots are captured at
+  row creation and never re-synced — the FK may drift if a label is later
+  edited, the snapshot cannot. **`performed_by` and `paid_by` are two orthogonal
+  axes, deliberately not one conflated enum** — Audit Topic 11's three-value
+  enum (internal | third_party | customer_paid) cannot express a
+  claimant-funded warrantor-performed inspection, or a warrantor-performed
+  inspection reimbursed by a vendor; all six combinations are operationally real
+  and there is **deliberately no CHECK coupling them**. Four-value status
+  machine: `open` → `in_progress` → `under_review` → `issued` (terminal on the
+  happy path; some tenant vocabularies call the resulting document an NCR).
+  `inspection_report` is JSONB because inspection shapes capture different
+  findings — same convention as `claims.claim_type_data`. Standard RLS Pattern
+  applied. **ON DELETE: RESTRICT on all three entity FKs.** `claim_id` was the
+  one genuinely deferred clause ("not yet locked... a Phase 3 implementation
+  detail") and resolved at build time as RESTRICT, matching 010/016/020;
+  CASCADE would hard-delete audit-bearing investigations into defect causation,
+  and 017's CASCADE does **not** transfer (a custom field value is a dependent
+  attribute; an inspection is an independent record with its own state machine).
+  The two lookup FKs were **not** deferred — the arch ref states they follow the
+  lookup tables' soft-delete semantics, and RESTRICT is additionally the only
+  architecturally available clause, both columns being NOT NULL (SET NULL
+  illegal, CASCADE destroys history). **Deliberate omissions, documented in the
+  migration header:** no `inspection_statuses` lookup table (status is a
+  workflow-driver, deliberately a different pattern from the two lookup columns
+  on the same table), no claimant-attendance column (Decision 18.1 — Joint
+  Inspection is a non-feature at the schema level; track in JSONB), no
+  `requested_by` column (Decision 18.2 — the requester axis is read from the
+  trigger value), no scheduling/findings/recommendation columns, no
+  cost-tracking columns (its own Tier 3 section reads `paid_by`), no custom
+  field support (outside Decision 3's Phase 1 scope; JSONB is the mechanism in
+  lieu), no `work_authorization_id`/`ala_id` FKs (both cross-entity
+  dependencies explicitly deferred downstream), no clock_events wiring (flagged
+  open), and no trigger enforcing the snapshot sync invariant (17.A.6: no
+  triggers at v1). The tenant-match invariant and the canonical validation rule
+  are app-layer.
 
 ---
 
@@ -272,16 +326,17 @@ Type Coverages have now moved out of this list):
 
 - Claim Intake Data Model
 - ALA System (Decision 19)
-- Inspections Foundation (Decision 17)
 - Service Report Submission (Decision 21)
 - Customer Work Authorization (Decision 11)
 - Customer-O&M Authorization (Decision 28)
 - Tenant-Editable Defaults Pattern (Decision 17) — PARTIAL: the canonical lookup
-  shape is built twice (`inspection_types` 018, `inspection_triggers` 019);
-  steps 4 and 5 of the pattern's own six-step convention remain — the
-  operational table's FK + value snapshot columns, and the canonical validation
-  helper. `Inspections Foundation` above stays fully unbuilt: these are its
-  lookup tables, not the `inspections` table itself.
+  shape is built twice (`inspection_types` 018, `inspection_triggers` 019), and
+  step 4 is now built — the operational table `inspections` (021) carries both
+  FK + value snapshot column pairs. Step 5 of the pattern's own six-step
+  convention remains: the canonical validation helper, which is application-
+  layer and does not yet exist. The Status moves to `Implemented (schema)` only
+  when step 5 lands. `Inspections Foundation` has left this list entirely —
+  built as 021.
 - Acknowledgment Gate Pattern (Decision 12)
 - Stateless Tokenized Interaction Pattern (applied, not yet coded)
 - FK + Snapshot Pattern, Feature Flag System, Database Migration Tooling, others
@@ -320,11 +375,11 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 15 of ~20 tables built (contacts, projects,
+   tenant-editable defaults). 16 of ~20 tables built (contacts, projects,
    import_batches, tenant_id_sequences, warranty_registrations, warranty_types,
    warranty_coverages, clock_events, internal_teams, custom_field_definitions,
    claims, custom_field_values, inspection_types, inspection_triggers,
-   work_plans)
+   work_plans, inspections)
    plus the warranty_coverages_effective view.
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
    event dispatcher, the entity UIs. (Includes new-tenant provisioning seeding
