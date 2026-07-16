@@ -306,6 +306,100 @@ COMMENT ON COLUMN "public"."acknowledgment_gate_templates"."deleted_at" IS 'Soft
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."ala_document_revisions" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "ala_document_id" "uuid" NOT NULL,
+    "revised_by_user_id" "uuid" NOT NULL,
+    "revision_reason" "jsonb" NOT NULL,
+    "field_changes" "jsonb" NOT NULL,
+    "revised_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."ala_document_revisions" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."ala_document_revisions" IS 'Full history of warrantor content changes to one ALA document (Decision 26), resolving the revise-and-resend question Decision 19 deferred: operational pressure surfaced a need to update an ALA''s content (new findings, revised scope) without creating a second ala_documents row, which UNIQUE(claim_id) forbids and continues to forbid (26.2). Distinct from Decision 25''s re-issue: re-issue resends the SAME content after non-response; revise-and-resend changes the content because circumstances changed. The revise action (26.3) updates the row in place, logs prior state here, clears overdue_flagged_at, regenerates the token, and resends. Revising a SIGNED ALA is blocked at v1 (26.4) -- the gate is already cleared on the strength of that signature, and revising accepted terms is a materially different problem; mirrors the O&M provider blocking convention (20.6/20.7). Structurally identical to work_authorization_revisions (022) and built verbatim to the locked 26.1 sketch: revised_at only, no created_at/updated_at, no soft-delete.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."ala_documents" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "claim_id" "uuid" NOT NULL,
+    "template_id" "uuid" NOT NULL,
+    "content_snapshot" "jsonb" NOT NULL,
+    "markup_percent_snapshot" numeric(4,3) NOT NULL,
+    "signer_name" "text",
+    "signer_email" "text",
+    "signed_at" timestamp with time zone,
+    "claimant_decision" "text",
+    "decided_at" timestamp with time zone,
+    "decline_reason" "text",
+    "signature_method" "text" DEFAULT 'in_platform_widget'::"text" NOT NULL,
+    "signature_image_url" "text",
+    "esignature_envelope_id" "text",
+    "overdue_flagged_at" timestamp with time zone,
+    "claimant_token" "text",
+    "claimant_token_expires_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "ala_documents_claimant_decision_check" CHECK (("claimant_decision" = ANY (ARRAY['accepted'::"text", 'declined'::"text"]))),
+    CONSTRAINT "ala_documents_signature_method_check" CHECK (("signature_method" = ANY (ARRAY['in_platform_widget'::"text", 'esignature_service'::"text"])))
+);
+
+
+ALTER TABLE "public"."ala_documents" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."ala_documents" IS 'One claimant''s Owner''s Consent and Assumption of Liability Agreement for one Indistinct claim (Decision 19). Exists ONLY when a claim''s outcome is Indistinct -- most claims never have one. UNIQUE on claim_id enforces 1:1 and Decision 26.2 explicitly refuses to reopen it: a claim either is Indistinct and has exactly one ALA, or is not Indistinct and has none. The deliberate contrast against work_authorization_documents (022), which is one-to-many because it authorizes a bounded, recurring on-site event; an ALA authorizes financial liability for the claim''s investigation, once. Content changes go through revise-and-resend (026), never a second row.';
+
+
+
+COMMENT ON COLUMN "public"."ala_documents"."markup_percent_snapshot" IS 'Decision 7: the tenant''s ala_markup_percent (default 0.10, stored at tenants.settings.ala_markup_percent) frozen at document generation. A tenant who changes their markup later does not retroactively change documents already generated. The 0 to 0.50 validation bounds are app-layer: the numeric(4,3) type constrains precision, not the architectural bounds. v1''s 15% figure was checked against all six claim intake workbooks during drafting and confirmed unsourced; Decision 7''s 10% stands.';
+
+
+
+COMMENT ON COLUMN "public"."ala_documents"."claimant_decision" IS 'Half of the DERIVED three-state machine (Decision 19.7). There is deliberately NO status column: unsigned = claimant_decision IS NULL AND signed_at IS NULL; signed = ''accepted'' AND signed_at IS NOT NULL; declined = ''declined'' AND signed_at IS NULL. These three are the complete state set. The app-layer invariant that ''accepted'' implies signed_at non-null follows from Decision 19.1''s atomic accept-and-signature write; it is enforced in the Server Action, not by a DB CHECK (17.A.6).';
+
+
+
+COMMENT ON COLUMN "public"."ala_documents"."signature_method" IS 'Decision 19.3. Platform-locked CHECK enum WITH a default, captured at row creation from the tenant''s ala_signature_method setting and frozen for the document''s lifetime. in_platform_widget is the accessibility-compliant default path; esignature_service routes to an external provider. The mechanism-specific artifact lands in signature_image_url or esignature_envelope_id respectively -- both conditional, both app-layer.';
+
+
+
+COMMENT ON COLUMN "public"."ala_documents"."overdue_flagged_at" IS 'Decision 25.4: a FOURTH ORTHOGONAL SIGNAL layered on top of the unsigned state -- NOT a fourth state. Set by the clock dispatcher when ala_response_overdue fires with claimant_decision still null (25.5); the claimant is emailed that the window closed with no decision made, and no decision is recorded. Silence never becomes a decision (25.8): there is no auto-terminal state. It persists until the warrantor re-issues (25.7) or escalates manually. Does not unblock the Indistinct gate.';
+
+
+
+COMMENT ON COLUMN "public"."ala_documents"."claimant_token" IS 'Stateless Tokenized Interaction Pattern (Decision 19.8), stored on this row per the pattern''s "shape to copy, not shared store" rule -- parallel to work_authorization_documents.customer_token (022). Per-row token regeneration handles expiry recovery: the warrantor updates both token columns on the existing row, and the document''s state combination (claimant_decision, signed_at) is preserved across regeneration.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."ala_templates" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "content" "jsonb" NOT NULL,
+    "is_default" boolean DEFAULT false NOT NULL,
+    "deleted_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."ala_templates" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."ala_templates" IS 'Tenant-defined reusable configuration for the Owner''s Consent and Assumption of Liability Agreement (Decision 19). A tenant has one or more templates; Phase 1 likely has one default per tenant, with multiple templates supporting warrantors who use different agreement variants for different claim types or jurisdictions. Same templates-and-documents shape as Customer Work Authorization (022) and the Acknowledgment Gate Pattern (023). The platform stores template content and any tenant-supplied document-number identifier, but does not reserve or assign document numbers itself -- numbering is data, not architecture. This section does NOT specify the legal form of the agreement: that content is warrantor-specific.';
+
+
+
+COMMENT ON COLUMN "public"."ala_templates"."is_default" IS 'At most one is_default = true per tenant is the architectural intent. Enforcement is app-layer: the arch ref offers partial-UNIQUE or app-layer and picks neither, and Decision 17.A.6 caps v1 DB enforcement. The third parallel flag, after work_authorization_templates (022) and acknowledgment_gate_templates (023) -- identical question, identical answer.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."claims" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -1064,6 +1158,26 @@ ALTER TABLE ONLY "public"."acknowledgment_gate_templates"
 
 
 
+ALTER TABLE ONLY "public"."ala_document_revisions"
+    ADD CONSTRAINT "ala_document_revisions_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."ala_documents"
+    ADD CONSTRAINT "ala_documents_claim_id_key" UNIQUE ("claim_id");
+
+
+
+ALTER TABLE ONLY "public"."ala_documents"
+    ADD CONSTRAINT "ala_documents_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."ala_templates"
+    ADD CONSTRAINT "ala_templates_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."claims"
     ADD CONSTRAINT "claims_pkey" PRIMARY KEY ("id");
 
@@ -1216,6 +1330,26 @@ CREATE INDEX "acknowledgment_gate_templates_purpose_idx" ON "public"."acknowledg
 
 
 CREATE INDEX "acknowledgment_gate_templates_tenant_id_idx" ON "public"."acknowledgment_gate_templates" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "ala_document_revisions_document_id_idx" ON "public"."ala_document_revisions" USING "btree" ("ala_document_id");
+
+
+
+CREATE INDEX "ala_document_revisions_tenant_id_idx" ON "public"."ala_document_revisions" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "ala_documents_template_id_idx" ON "public"."ala_documents" USING "btree" ("template_id");
+
+
+
+CREATE INDEX "ala_documents_tenant_id_idx" ON "public"."ala_documents" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "ala_templates_tenant_id_idx" ON "public"."ala_templates" USING "btree" ("tenant_id");
 
 
 
@@ -1391,6 +1525,41 @@ ALTER TABLE ONLY "public"."acknowledgment_gate_records"
 
 ALTER TABLE ONLY "public"."acknowledgment_gate_templates"
     ADD CONSTRAINT "acknowledgment_gate_templates_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."ala_document_revisions"
+    ADD CONSTRAINT "ala_document_revisions_ala_document_id_fkey" FOREIGN KEY ("ala_document_id") REFERENCES "public"."ala_documents"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."ala_document_revisions"
+    ADD CONSTRAINT "ala_document_revisions_revised_by_user_id_fkey" FOREIGN KEY ("revised_by_user_id") REFERENCES "public"."users"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."ala_document_revisions"
+    ADD CONSTRAINT "ala_document_revisions_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."ala_documents"
+    ADD CONSTRAINT "ala_documents_claim_id_fkey" FOREIGN KEY ("claim_id") REFERENCES "public"."claims"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."ala_documents"
+    ADD CONSTRAINT "ala_documents_template_id_fkey" FOREIGN KEY ("template_id") REFERENCES "public"."ala_templates"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."ala_documents"
+    ADD CONSTRAINT "ala_documents_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."ala_templates"
+    ADD CONSTRAINT "ala_templates_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
 
@@ -1660,6 +1829,27 @@ ALTER TABLE "public"."acknowledgment_gate_templates" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "acknowledgment_gate_templates: tenant read" ON "public"."acknowledgment_gate_templates" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."ala_document_revisions" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "ala_document_revisions: tenant read" ON "public"."ala_document_revisions" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."ala_documents" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "ala_documents: tenant read" ON "public"."ala_documents" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."ala_templates" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "ala_templates: tenant read" ON "public"."ala_templates" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -2028,6 +2218,24 @@ GRANT ALL ON TABLE "public"."acknowledgment_gate_records" TO "service_role";
 GRANT ALL ON TABLE "public"."acknowledgment_gate_templates" TO "anon";
 GRANT ALL ON TABLE "public"."acknowledgment_gate_templates" TO "authenticated";
 GRANT ALL ON TABLE "public"."acknowledgment_gate_templates" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."ala_document_revisions" TO "anon";
+GRANT ALL ON TABLE "public"."ala_document_revisions" TO "authenticated";
+GRANT ALL ON TABLE "public"."ala_document_revisions" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."ala_documents" TO "anon";
+GRANT ALL ON TABLE "public"."ala_documents" TO "authenticated";
+GRANT ALL ON TABLE "public"."ala_documents" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."ala_templates" TO "anon";
+GRANT ALL ON TABLE "public"."ala_templates" TO "authenticated";
+GRANT ALL ON TABLE "public"."ala_templates" TO "service_role";
 
 
 

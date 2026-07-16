@@ -3834,7 +3834,7 @@ Parallel to the deliberate-omissions lists in Tier 2:
 
 ## ALA System
 
-**Status: Designed.** ALA markup default and storage locked by
+**Status: Implemented (schema).** ALA markup default and storage locked by
 Decision 7. ala_templates and ala_documents schemas follow Audit Topic
 10's shape with the operational behavior the SOPs specify. Signature
 capture mechanism locked by Decision 19 — ten architectural commitments
@@ -3991,6 +3991,22 @@ invariant is a Phase 3 implementation detail.
                                   -- populated when signature_method =
                                   -- 'esignature_service' AND signed_at
                                   -- non-null
+      overdue_flagged_at          timestamptz nullable
+                                  -- added by Decision 25.4, which
+                                  -- postdates this sketch and names the
+                                  -- column in prose only; recorded here
+                                  -- so the sketch matches the built
+                                  -- table (025). Set when
+                                  -- ala_response_overdue fires and
+                                  -- claimant_decision is still null.
+                                  -- A pure marker: does NOT change
+                                  -- claimant_decision or signed_at, and
+                                  -- does NOT unblock the Indistinct
+                                  -- blocking gate (Decision 19.7). A
+                                  -- fourth orthogonal signal, not a
+                                  -- fourth state. See the "Response
+                                  -- window, overdue flag, and re-issue"
+                                  -- subsection below.
       claimant_token              text nullable
                                   -- single-use token for the
                                   -- tokenized signing link; per
