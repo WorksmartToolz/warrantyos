@@ -5210,15 +5210,19 @@ Parallel to the deliberate-omissions lists elsewhere:
 
 ## Acknowledgment Gate Pattern
 
-**Status: Designed.** This is a Tier 1 platform-wide pattern locked by
-Decision 12 (Phase 3 decisions log). The two tables
-(acknowledgment_gate_templates and acknowledgment_gate_records) are Phase
-3 tables to be migrated. The pattern's logical placement is alongside the
-other Tier 1 conventions (Stateless Tokenized Interaction, FK + Snapshot,
-Standard RLS, Custom Field System, Clock Event Infrastructure, ID
-Generation, Schema Source-of-Truth); appending it at the end of v2 here is
-a drafting-order convenience. Final section ordering is settled at the
-Tier 4 reorganization before swap to canonical.
+**Status: Implemented (schema).** This is a Tier 1 platform-wide pattern
+locked by Decision 12 (Phase 3 decisions log). Both tables
+(acknowledgment_gate_templates and acknowledgment_gate_records) are built as
+migration 023_acknowledgment_gate.sql, with zero deferred FKs. The pattern's
+logical placement is alongside the other Tier 1 conventions (Stateless
+Tokenized Interaction, FK + Snapshot, Standard RLS, Custom Field System,
+Clock Event Infrastructure, ID Generation, Schema Source-of-Truth); appending
+it at the end of v2 here is a drafting-order convenience. Final section
+ordering is settled at the Tier 4 reorganization before swap to canonical.
+
+The application layer -- the Server Action gate mechanics of 12.7, which
+render or skip the gate and insert the record on submission -- is not yet
+built. The Status reflects schema only.
 
 Some tokenized customer interactions need to put content in front of the
 customer before the customer sees the actual interaction form — a Site
@@ -5492,19 +5496,47 @@ Decision 12 does not lock the answer.
 
 Flagged for downstream / Phase 3 implementation:
 
-- Polymorphic FK shape (Decision 12.6). The choice between separate
-  per-entity-type FK columns, a single polymorphic authorized_entity_id
-  with app-layer dispatch, or a junction table is a Phase 3
-  implementation detail. Decision 12 locks the column-level shape;
-  the mechanics are downstream.
-- is_default enforcement. Partial UNIQUE index on (tenant_id,
-  gate_purpose) where is_default = true vs application-layer invariant
-  is a Phase 3 implementation detail, parallel to ALA's is_default
-  flag.
-- ON DELETE behavior on acknowledgment_gate_records.template_id. The
-  soft-delete-on-templates convention means hard-deletion isn't an
-  ordinary path, but the FK clause itself is a Phase 3 implementation
-  detail.
+- Polymorphic FK shape (Decision 12.6). **RESOLVED at build time (023):
+  a single polymorphic authorized_entity_id column, NO database FK, with
+  app-layer dispatch by authorized_entity_type.** Of the three candidates,
+  it is the only one that honors the two-column shape Decision 12 commits
+  to BY NAME in both schema sketches. The junction table is doubly
+  excluded: it eliminates both locked columns, and it supports
+  many-to-many, which 12.4's one-gate-per-entity commitment forbids.
+  Separate typed per-entity FK columns (claim_id,
+  work_authorization_document_id, + CHECK exactly-one-non-null) would give
+  real referential integrity, and Decision 3's custom_field_values (017) is
+  a genuine precedent for preferring typed FKs over a polymorphic key --
+  but that shape also deletes both locked columns, and 017's precedent does
+  not transfer, because Decision 3 chose typed FKs where no locked column
+  name was at stake. Here two are. This is the same reasoning and the same
+  answer as Decision 11.b on work_authorization_documents.event_reference_id
+  (022), the structurally identical question; the deciding test in both
+  cases is whether the locked text names the column. In-repo precedent for
+  the shape: clock_events.entity_id (013), FK-less and resolved by
+  entity_type. One deliberate difference from 022: authorized_entity_id is
+  NOT NULL, where event_reference_id is nullable -- each built verbatim to
+  its own locked sketch, and an acknowledgment is by definition an
+  acknowledgment OF something. Consequence accepted: dispatch and
+  referential integrity are application-layer concerns, and the application
+  must check for acknowledgment records before allowing a protected entity
+  to be deleted.
+- is_default enforcement. **RESOLVED at build time (023): application-layer
+  invariant, no partial UNIQUE index.** Decision 17.A.6 caps v1 DB
+  enforcement at value sets, NOT NULLs, and FK integrity, and every prior
+  table places this class of invariant app-layer. Customer Work
+  Authorization (022) answered the identical question the same way; ALA's
+  parallel flag resolves the same way when Decision 19 lands. Three
+  parallel flags, one answer.
+- ON DELETE behavior on acknowledgment_gate_records.template_id.
+  **RESOLVED at build time (023): RESTRICT.** The restraint this section
+  already names is the reason: templates soft-delete, records captured
+  against a retired template must remain readable, and the template_id FK
+  must stay valid for reporting and historical query. CASCADE would be the
+  cascade-destruction of auditable data -- the record of what a customer
+  agreed to -- that the architecture names as the outcome to avoid.
+  Directly parallel to 022's template_id and 017's definition_id: same
+  shape, same reasoning, same answer.
 - gate_purpose enum CHECK constraint extension mechanism. Adding a new
   gate_purpose value is a migration that updates the CHECK constraint,
   same as the clock_events event_type and the claim claim_type enums.

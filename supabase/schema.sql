@@ -109,6 +109,71 @@ SET default_tablespace = '';
 SET default_table_access_method = "heap";
 
 
+CREATE TABLE IF NOT EXISTS "public"."acknowledgment_gate_records" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "template_id" "uuid" NOT NULL,
+    "template_content_snapshot" "jsonb" NOT NULL,
+    "acknowledger_name" "text",
+    "acknowledged_at" timestamp with time zone NOT NULL,
+    "acknowledger_ip" "text",
+    "authorized_entity_type" "text" NOT NULL,
+    "authorized_entity_id" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "acknowledgment_gate_records_authorized_entity_type_check" CHECK (("authorized_entity_type" = ANY (ARRAY['claim'::"text", 'work_authorization_document'::"text"])))
+);
+
+
+ALTER TABLE "public"."acknowledgment_gate_records" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."acknowledgment_gate_records" IS 'Per-acknowledgment-event instantiations (Decision 12): for one specific protected entity, the customer''s acknowledgment with the template content frozen at the moment they agreed, the acknowledger''s identity capture, the timestamp, the IP for audit trail, and a polymorphic reference to the protected entity the acknowledgment authorizes. One gate per protected entity in Phase 1 (12.4): once this row exists, the gate is not shown again for that entity on subsequent link clicks. That "at most one" is enforced by the Server Action''s existence check (12.7 step 3), not by a DB unique. Multi-gate-per-entity is deferred as speculative -- a tenant needing several acknowledgments composes them into one longer template''s content.';
+
+
+
+COMMENT ON COLUMN "public"."acknowledgment_gate_records"."template_content_snapshot" IS 'The frozen content the customer actually agreed to, captured at acknowledgment rather than referenced live through template_id. Same defensibility logic as ALA''s content_snapshot and the FK + Snapshot Pattern: a later template revision must not retroactively alter what the customer agreed to. The template_id FK preserves the relationship for reporting; this column preserves the historical truth.';
+
+
+
+COMMENT ON COLUMN "public"."acknowledgment_gate_records"."authorized_entity_id" IS 'Polymorphic reference to the protected entity: claims.id when authorized_entity_type = ''claim'', work_authorization_documents.id when ''work_authorization_document''. NO database FK -- Decision 12 locks the two-column (authorized_entity_type + authorized_entity_id) shape by name, and typed per-entity FK columns would delete both locked columns. Same reasoning and same answer as Decision 11.b on 022''s event_reference_id, the structurally identical question; precedent also clock_events.entity_id (013). Deliberately NOT NULL where 022''s event_reference_id is nullable: both are built verbatim to their own locked sketches, and an acknowledgment is by definition an acknowledgment OF something. Do not harmonize. Dispatch and referential integrity are app-layer; the application must check for acknowledgment records before allowing a protected entity to be deleted.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."acknowledgment_gate_templates" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "gate_purpose" "text" NOT NULL,
+    "name" "text" NOT NULL,
+    "content" "jsonb" NOT NULL,
+    "acknowledgment_label" "text" NOT NULL,
+    "requires_typed_name" boolean DEFAULT false NOT NULL,
+    "is_default" boolean DEFAULT false NOT NULL,
+    "deleted_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "acknowledgment_gate_templates_gate_purpose_check" CHECK (("gate_purpose" = ANY (ARRAY['claim_submission'::"text", 'work_authorization'::"text"])))
+);
+
+
+ALTER TABLE "public"."acknowledgment_gate_templates" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."acknowledgment_gate_templates" IS 'Tenant-defined gate definitions (Decision 12): which interaction purpose the gate guards, the gate''s content, the acknowledgment text beside the checkbox, whether a typed name is required, and which template is the tenant''s default for the purpose. Same templates-and-records shape as the ALA System and Customer Work Authorization (022). Gates are OPTIONAL per tenant per purpose (12.3): a tenant whose external compliance processes already handle the equivalent acknowledgment leaves the purpose unconfigured, and their customers proceed directly to the interaction form. Zero rows is a valid steady state -- which is why this migration deliberately seeds nothing.';
+
+
+
+COMMENT ON COLUMN "public"."acknowledgment_gate_templates"."gate_purpose" IS 'Which tokenized customer interaction this gate guards. Phase 1 values: claim_submission (guards a Claim Intake tokenized intake form), work_authorization (guards a Customer Work Authorization tokenized acceptance form, 022). Extensible the same way Decision 9''s clock_events.event_type is: a future tokenized interaction that benefits from a pre-form gate adds a value and updates this CHECK via migration, without restructuring the tables. Other candidates named but NOT locked by Decision 12: registration assignee submission, supply-only delivery reporting, service report customer review -- each a per-interaction decision when those sections are drafted.';
+
+
+
+COMMENT ON COLUMN "public"."acknowledgment_gate_templates"."is_default" IS 'At most one is_default = true per (tenant_id, gate_purpose) is the architectural intent. Enforcement is app-layer: the arch ref offers partial-UNIQUE or app-layer and picks neither, and Decision 17.A.6 caps v1 DB enforcement. Parallel to Work Authorization''s (022) and ALA''s is_default flags -- three parallel flags, one answer.';
+
+
+
+COMMENT ON COLUMN "public"."acknowledgment_gate_templates"."deleted_at" IS 'Soft-delete is required, not optional. Records captured against a retired template must remain readable: the frozen template_content_snapshot preserves what the customer actually agreed to, but the template_id FK must remain valid for reporting and historical query. Hard-deleting a template would break that relationship -- hence RESTRICT on records.template_id.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."claims" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -836,6 +901,16 @@ COMMENT ON COLUMN "public"."work_plans"."planned_end_at" IS 'SOP 6 component 6 (
 
 
 
+ALTER TABLE ONLY "public"."acknowledgment_gate_records"
+    ADD CONSTRAINT "acknowledgment_gate_records_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."acknowledgment_gate_templates"
+    ADD CONSTRAINT "acknowledgment_gate_templates_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."claims"
     ADD CONSTRAINT "claims_pkey" PRIMARY KEY ("id");
 
@@ -963,6 +1038,26 @@ ALTER TABLE ONLY "public"."work_authorization_templates"
 
 ALTER TABLE ONLY "public"."work_plans"
     ADD CONSTRAINT "work_plans_pkey" PRIMARY KEY ("id");
+
+
+
+CREATE INDEX "acknowledgment_gate_records_authorized_entity_idx" ON "public"."acknowledgment_gate_records" USING "btree" ("authorized_entity_type", "authorized_entity_id");
+
+
+
+CREATE INDEX "acknowledgment_gate_records_template_id_idx" ON "public"."acknowledgment_gate_records" USING "btree" ("template_id");
+
+
+
+CREATE INDEX "acknowledgment_gate_records_tenant_id_idx" ON "public"."acknowledgment_gate_records" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "acknowledgment_gate_templates_purpose_idx" ON "public"."acknowledgment_gate_templates" USING "btree" ("tenant_id", "gate_purpose");
+
+
+
+CREATE INDEX "acknowledgment_gate_templates_tenant_id_idx" ON "public"."acknowledgment_gate_templates" USING "btree" ("tenant_id");
 
 
 
@@ -1115,6 +1210,21 @@ CREATE OR REPLACE TRIGGER "users_set_updated_at" BEFORE UPDATE ON "public"."user
 
 
 CREATE OR REPLACE TRIGGER "warranty_types_protect_system" BEFORE DELETE OR UPDATE ON "public"."warranty_types" FOR EACH ROW EXECUTE FUNCTION "public"."protect_system_warranty_types"();
+
+
+
+ALTER TABLE ONLY "public"."acknowledgment_gate_records"
+    ADD CONSTRAINT "acknowledgment_gate_records_template_id_fkey" FOREIGN KEY ("template_id") REFERENCES "public"."acknowledgment_gate_templates"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."acknowledgment_gate_records"
+    ADD CONSTRAINT "acknowledgment_gate_records_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."acknowledgment_gate_templates"
+    ADD CONSTRAINT "acknowledgment_gate_templates_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
 
@@ -1365,6 +1475,20 @@ ALTER TABLE ONLY "public"."work_plans"
 
 ALTER TABLE ONLY "public"."work_plans"
     ADD CONSTRAINT "work_plans_warranty_professional_user_id_fkey" FOREIGN KEY ("warranty_professional_user_id") REFERENCES "public"."users"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE "public"."acknowledgment_gate_records" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "acknowledgment_gate_records: tenant read" ON "public"."acknowledgment_gate_records" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."acknowledgment_gate_templates" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "acknowledgment_gate_templates: tenant read" ON "public"."acknowledgment_gate_templates" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -1714,6 +1838,18 @@ GRANT ALL ON FUNCTION "public"."get_user_tenant_id"() TO "authenticated";
 
 
 
+
+
+
+GRANT ALL ON TABLE "public"."acknowledgment_gate_records" TO "anon";
+GRANT ALL ON TABLE "public"."acknowledgment_gate_records" TO "authenticated";
+GRANT ALL ON TABLE "public"."acknowledgment_gate_records" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."acknowledgment_gate_templates" TO "anon";
+GRANT ALL ON TABLE "public"."acknowledgment_gate_templates" TO "authenticated";
+GRANT ALL ON TABLE "public"."acknowledgment_gate_templates" TO "service_role";
 
 
 
