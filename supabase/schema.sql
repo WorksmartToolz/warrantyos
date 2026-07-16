@@ -257,6 +257,90 @@ CREATE TABLE IF NOT EXISTS "public"."import_batches" (
 ALTER TABLE "public"."import_batches" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."inspection_triggers" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "value" "text" NOT NULL,
+    "label" "text" NOT NULL,
+    "lock_tier" "text" NOT NULL,
+    "sort_order" integer DEFAULT 0 NOT NULL,
+    "disabled_at" timestamp with time zone,
+    "deleted_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "inspection_triggers_lock_tier_check" CHECK (("lock_tier" = ANY (ARRAY['platform_locked'::"text", 'platform_seeded'::"text", 'tenant_added'::"text"])))
+);
+
+
+ALTER TABLE "public"."inspection_triggers" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."inspection_triggers" IS 'Tenant-editable defaults lookup table for inspection triggers: what caused an inspection to be performed. Second canonical application of the Tenant-Editable Defaults Pattern (Decision 17 Part A). Eight platform_locked defaults seeded per tenant (Decision 17.B.2); tenants may add tenant_added rows, and may disable but not rename or soft-delete the platform_locked defaults. The inspections table references this via inspection_trigger_id (FK) + inspection_trigger_value (snapshot) per 17.A.2.';
+
+
+
+COMMENT ON COLUMN "public"."inspection_triggers"."value" IS 'Platform-canonical identifier: snake_case, lowercase, stable. Identical across all tenants for platform_locked rows (Decision 17.A.9) so cross-tenant analytics filter by value rather than id. Locked for platform_locked and platform_seeded rows; auto-slugified from label at creation for tenant_added rows. Uniqueness within (tenant_id) is an application-layer invariant.';
+
+
+
+COMMENT ON COLUMN "public"."inspection_triggers"."label" IS 'Tenant-displayed name shown in dropdowns, reports, and operational UI. Editable for platform_seeded and tenant_added rows; locked for platform_locked rows. Label edits never re-derive value.';
+
+
+
+COMMENT ON COLUMN "public"."inspection_triggers"."lock_tier" IS 'Three-category discriminator (Decision 17.A.5). platform_locked: platform commits to the value as canonical; tenants cannot rename or soft-delete, but CAN disable. platform_seeded: starting point; tenants can rename and disable, cannot soft-delete. tenant_added: full tenant control. Edit permissions are enforced app-layer per 17.A.6; the CHECK constrains the value set only.';
+
+
+
+COMMENT ON COLUMN "public"."inspection_triggers"."disabled_at" IS 'Tenant-disabled. Hides the row from new-entry dropdowns and the active admin list view; historical operational records referencing the value continue to display normally (the FK + Snapshot integration preserves the value at row creation). Applies to ALL lock_tiers including platform_locked (17.A.7).';
+
+
+
+COMMENT ON COLUMN "public"."inspection_triggers"."deleted_at" IS 'Soft-delete. Applies ONLY to lock_tier = tenant_added rows (17.A.7); the platform commits to structural persistence of platform_locked and platform_seeded rows. disabled_at is the operational analog for those. Enforced app-layer, not by DB CHECK, per 17.A.6.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."inspection_types" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "value" "text" NOT NULL,
+    "label" "text" NOT NULL,
+    "lock_tier" "text" NOT NULL,
+    "sort_order" integer DEFAULT 0 NOT NULL,
+    "disabled_at" timestamp with time zone,
+    "deleted_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "inspection_types_lock_tier_check" CHECK (("lock_tier" = ANY (ARRAY['platform_locked'::"text", 'platform_seeded'::"text", 'tenant_added'::"text"])))
+);
+
+
+ALTER TABLE "public"."inspection_types" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."inspection_types" IS 'Tenant-editable defaults lookup table for inspection types. First canonical application of the Tenant-Editable Defaults Pattern (Decision 17 Part A). Four platform_locked defaults seeded per tenant (Decision 17.B.1); tenants may add tenant_added rows, and may disable but not rename or soft-delete the platform_locked defaults. The inspections table references this via inspection_type_id (FK) + inspection_type_value (snapshot) per 17.A.2.';
+
+
+
+COMMENT ON COLUMN "public"."inspection_types"."value" IS 'Platform-canonical identifier: snake_case, lowercase, stable. Identical across all tenants for platform_locked rows (Decision 17.A.9) so cross-tenant analytics filter by value rather than id. Locked for platform_locked and platform_seeded rows; auto-slugified from label at creation for tenant_added rows. Uniqueness within (tenant_id) is an application-layer invariant.';
+
+
+
+COMMENT ON COLUMN "public"."inspection_types"."label" IS 'Tenant-displayed name shown in dropdowns, reports, and operational UI. Editable for platform_seeded and tenant_added rows; locked for platform_locked rows. Label edits never re-derive value.';
+
+
+
+COMMENT ON COLUMN "public"."inspection_types"."lock_tier" IS 'Three-category discriminator (Decision 17.A.5). platform_locked: platform commits to the value as canonical; tenants cannot rename or soft-delete, but CAN disable. platform_seeded: starting point; tenants can rename and disable, cannot soft-delete. tenant_added: full tenant control. Edit permissions are enforced app-layer per 17.A.6; the CHECK constrains the value set only.';
+
+
+
+COMMENT ON COLUMN "public"."inspection_types"."disabled_at" IS 'Tenant-disabled. Hides the row from new-entry dropdowns and the active admin list view; historical operational records referencing the value continue to display normally (the FK + Snapshot integration preserves the value at row creation). Applies to ALL lock_tiers including platform_locked (17.A.7).';
+
+
+
+COMMENT ON COLUMN "public"."inspection_types"."deleted_at" IS 'Soft-delete. Applies ONLY to lock_tier = tenant_added rows (17.A.7); the platform commits to structural persistence of platform_locked and platform_seeded rows. disabled_at is the operational analog for those. Enforced app-layer, not by DB CHECK, per 17.A.6.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."internal_teams" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -552,6 +636,16 @@ ALTER TABLE ONLY "public"."import_batches"
 
 
 
+ALTER TABLE ONLY "public"."inspection_triggers"
+    ADD CONSTRAINT "inspection_triggers_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."inspection_types"
+    ADD CONSTRAINT "inspection_types_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."internal_teams"
     ADD CONSTRAINT "internal_teams_pkey" PRIMARY KEY ("id");
 
@@ -677,6 +771,14 @@ CREATE INDEX "import_batches_tenant_id_idx" ON "public"."import_batches" USING "
 
 
 
+CREATE INDEX "inspection_triggers_tenant_id_idx" ON "public"."inspection_triggers" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "inspection_types_tenant_id_idx" ON "public"."inspection_types" USING "btree" ("tenant_id");
+
+
+
 CREATE INDEX "internal_teams_tenant_id_idx" ON "public"."internal_teams" USING "btree" ("tenant_id");
 
 
@@ -789,6 +891,16 @@ ALTER TABLE ONLY "public"."import_batches"
 
 ALTER TABLE ONLY "public"."import_batches"
     ADD CONSTRAINT "import_batches_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."inspection_triggers"
+    ADD CONSTRAINT "inspection_triggers_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."inspection_types"
+    ADD CONSTRAINT "inspection_types_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
 
@@ -916,6 +1028,20 @@ ALTER TABLE "public"."import_batches" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "import_batches: members can view their tenant's rows" ON "public"."import_batches" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."inspection_triggers" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "inspection_triggers: members can view their tenant's rows" ON "public"."inspection_triggers" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."inspection_types" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "inspection_types: members can view their tenant's rows" ON "public"."inspection_types" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -1210,6 +1336,18 @@ GRANT ALL ON TABLE "public"."custom_field_values" TO "service_role";
 GRANT ALL ON TABLE "public"."import_batches" TO "anon";
 GRANT ALL ON TABLE "public"."import_batches" TO "authenticated";
 GRANT ALL ON TABLE "public"."import_batches" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."inspection_triggers" TO "anon";
+GRANT ALL ON TABLE "public"."inspection_triggers" TO "authenticated";
+GRANT ALL ON TABLE "public"."inspection_triggers" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."inspection_types" TO "anon";
+GRANT ALL ON TABLE "public"."inspection_types" TO "authenticated";
+GRANT ALL ON TABLE "public"."inspection_types" TO "service_role";
 
 
 

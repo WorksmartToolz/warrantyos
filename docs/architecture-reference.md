@@ -6716,11 +6716,19 @@ Parallel to the deliberate-omissions lists elsewhere:
 
 ## Tenant-Editable Defaults Pattern
 
-**Status: Designed.** This is a Tier 1 platform-wide pattern locked by
-Decision 17 Part A (Phase 3 decisions log). The pattern is greenfield
-architecture; no tables exist at v1 launch beyond what canonical
-applications introduce (inspection_types and inspection_triggers per
-Decision 17 Part B). Logical placement is alongside the other Tier 1
+**Status: Partially implemented (schema).** This is a Tier 1 platform-wide
+pattern locked by Decision 17 Part A (Phase 3 decisions log). The pattern's
+canonical lookup table shape is built: both canonical applications exist as
+migrations -- inspection_types (018) and inspection_triggers (019) per
+Decision 17 Part B -- each carrying the canonical column set verbatim, the
+lock_tier CHECK, the Standard RLS Pattern's six steps, and a backfill of the
+platform_locked defaults for tenants predating the migration. Steps 4 and 5
+of the six-step convention below remain unbuilt: the operational table
+(inspections) does not yet carry its FK + value snapshot columns, and the
+canonical validation helper does not yet exist. Per Decision 17.A.6 no
+PostgreSQL triggers are introduced at v1; the lookup tables are in their
+final schema shape, so the future migration to trigger enforcement remains
+a pure DB-layer change. Logical placement is alongside the other Tier 1
 patterns (Standard RLS, FK + Snapshot, Custom Field System, Acknowledgment
 Gate, Stateless Tokenized Interaction, Clock Event Infrastructure, ID
 Generation, Schema Source-of-Truth, Feature Flag System). Final section
