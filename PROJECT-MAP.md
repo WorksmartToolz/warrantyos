@@ -4,9 +4,9 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-15 (Chat 14), HEAD `77ed146`, from verified git history
+**Last built:** 2026-07-15 (Chat 15), HEAD `a18dd76`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (twelve tables + one view built). Not from memory or
+construction is underway (fourteen tables + one view built). Not from memory or
 handoff summaries.
 
 ---
@@ -20,10 +20,11 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first twelve tables (`contacts`, `projects`,
+construction has started**: the first fourteen tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
 `warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
-`custom_field_definitions`, `claims`, `custom_field_values`) are built,
+`custom_field_definitions`, `claims`, `custom_field_values`,
+`inspection_types`, `inspection_triggers`) are built,
 migrated, and committed —
 along with the `warranty_coverages_effective` view — with all FK constraints
 between them closed. The era is now building, not designing.
@@ -42,7 +43,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (12 tables + 1 view built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (14 tables + 1 view built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -58,13 +59,14 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 18** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 20** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
   **012_warranty_coverages**, **013_clock_events**, **014_internal_teams**,
-  **015_custom_field_definitions**, **016_claims**, and
-  **017_custom_field_values** (Phase 3 tables, the FK constraints closing
+  **015_custom_field_definitions**, **016_claims**,
+  **017_custom_field_values**, **018_inspection_types**, and
+  **019_inspection_triggers** (Phase 3 tables, the FK constraints closing
   them, and the `warranty_coverages_effective` view).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
@@ -192,6 +194,37 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   convention) and NOT NULL per the Standard RLS Pattern checklist. Partial
   indexes on the three entity FKs — each row populates exactly one. The
   stay-in-sync `tenant_id` invariant and `value` type-safety are app-layer.
+- **`inspection_types`** (018) and **`inspection_triggers`** (019) — the first
+  two canonical applications of the **Tenant-Editable Defaults Pattern**
+  (Decision 17 Part A), applied to Inspections per Decision 17 Part B. Both
+  carry the pattern's canonical column set **verbatim** — the six-step
+  convention says an applying entity substitutes the enum name and does **not**
+  vary the column set or types, so the two tables being structurally identical
+  is 17.A.1's per-enum-table model working as specified, not duplication to
+  factor out. Single behavioral CHECK on `lock_tier`
+  (`platform_locked` | `platform_seeded` | `tenant_added`, Decision 17.A.5).
+  Standard RLS Pattern applied. Seeded: 4 platform_locked inspection types
+  (17.B.1), 8 platform_locked inspection triggers (17.B.2, including
+  `third_party` as required by Decision 18.2). **Backfilled for tenants
+  predating the migrations** — a one-time bootstrap, **not** the propagation
+  17.A.3 forbids (that rule bars ongoing platform→tenant data flow *after*
+  provisioning, e.g. pushing a future fifth canonical default into existing
+  tenants; that remains forbidden). Without the bootstrap, existing tenants
+  hold zero rows and cannot create an inspection at all, since
+  `inspections.inspection_type_id` is NOT NULL. Precedent: 009 and 011.
+  Idempotent via `WHERE NOT EXISTS`, **not** 011's `ON CONFLICT` — there is no
+  unique index to serve as arbiter, and adding one would contradict locked
+  text. **Deliberate omissions, documented in both migration headers:** no
+  unique on `(tenant_id, value)` (the arch ref states value-uniqueness is an
+  application-layer invariant — stated, not omitted; 011's case-insensitive
+  unique protects Decision 6's anchor invariant and does **not** transfer), no
+  protection trigger (Decision 17.A.6: **no PostgreSQL triggers at v1** —
+  deliberately differing from 011, whose trigger is mandated by Decision 6's
+  defense-in-depth requirement; different decision, different answer), and no
+  CHECK tying `deleted_at` to `lock_tier = 'tenant_added'` (17.A.6 caps v1 DB
+  enforcement at the lock_tier value set, NOT NULLs, and FK integrity). New-
+  tenant seeding, the slugification of `label`→`value` for tenant_added rows,
+  and the canonical validation helper are app-layer.
 
 ---
 
@@ -210,7 +243,12 @@ Type Coverages have now moved out of this list):
 - Work Plan Workflow (Decisions 13–16) — PARTIAL: `internal_teams` built (014);
   `work_plans` remains
 - Customer-O&M Authorization (Decision 28)
-- Tenant-Editable Defaults Pattern (Decision 17)
+- Tenant-Editable Defaults Pattern (Decision 17) — PARTIAL: the canonical lookup
+  shape is built twice (`inspection_types` 018, `inspection_triggers` 019);
+  steps 4 and 5 of the pattern's own six-step convention remain — the
+  operational table's FK + value snapshot columns, and the canonical validation
+  helper. `Inspections Foundation` above stays fully unbuilt: these are its
+  lookup tables, not the `inspections` table itself.
 - Acknowledgment Gate Pattern (Decision 12)
 - Stateless Tokenized Interaction Pattern (applied, not yet coded)
 - FK + Snapshot Pattern, Feature Flag System, Database Migration Tooling, others
@@ -249,10 +287,10 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 12 of ~20 tables built (contacts, projects,
+   tenant-editable defaults). 14 of ~20 tables built (contacts, projects,
    import_batches, tenant_id_sequences, warranty_registrations, warranty_types,
    warranty_coverages, clock_events, internal_teams, custom_field_definitions,
-   claims, custom_field_values)
+   claims, custom_field_values, inspection_types, inspection_triggers)
    plus the warranty_coverages_effective view.
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
    event dispatcher, the entity UIs. (Includes new-tenant provisioning seeding
