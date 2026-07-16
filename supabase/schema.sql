@@ -52,6 +52,94 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA "extensions";
 
 
 
+CREATE OR REPLACE FUNCTION "public"."federal_holidays_for_year"("p_year" integer) RETURNS TABLE("holiday_date" "date", "label" "text")
+    LANGUAGE "plpgsql" IMMUTABLE
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_date  date;
+  v_label text;
+begin
+  if p_year is null or p_year < 1900 or p_year > 9999 then
+    raise exception 'federal_holidays_for_year: year out of range: %', p_year;
+  end if;
+
+  -- Fixed-date holidays, observed-shift rule applied.
+  -- Saturday (dow 6) -> preceding Friday; Sunday (dow 0) -> following Monday.
+  -- Five of the eleven are fixed-date: these four plus Veterans Day (below).
+  for v_date, v_label in
+    select d, l from (values
+      (make_date(p_year,  1,  1), 'New Year''s Day'),
+      (make_date(p_year,  6, 19), 'Juneteenth National Independence Day'),
+      (make_date(p_year,  7,  4), 'Independence Day'),
+      (make_date(p_year, 12, 25), 'Christmas Day')
+    ) as t(d, l)
+  loop
+    holiday_date := case extract(dow from v_date)
+                      when 6 then v_date - 1   -- Saturday -> Friday
+                      when 0 then v_date + 1   -- Sunday   -> Monday
+                      else v_date
+                    end;
+    label := v_label;
+    return next;
+  end loop;
+
+  -- Nth-weekday holidays. These always fall on a Monday or Thursday by
+  -- construction, so the observed-shift rule never applies to them.
+  --   third Monday of January
+  holiday_date := public.nth_weekday_of_month(p_year, 1, 1, 3);
+  label := 'Birthday of Martin Luther King, Jr.';
+  return next;
+
+  --   third Monday of February
+  holiday_date := public.nth_weekday_of_month(p_year, 2, 1, 3);
+  label := 'Washington''s Birthday';
+  return next;
+
+  --   LAST Monday of May
+  holiday_date := public.last_weekday_of_month(p_year, 5, 1);
+  label := 'Memorial Day';
+  return next;
+
+  --   first Monday of September
+  holiday_date := public.nth_weekday_of_month(p_year, 9, 1, 1);
+  label := 'Labor Day';
+  return next;
+
+  --   second Monday of October
+  holiday_date := public.nth_weekday_of_month(p_year, 10, 1, 2);
+  label := 'Columbus Day';
+  return next;
+
+  --   fourth Thursday of November
+  holiday_date := public.nth_weekday_of_month(p_year, 11, 4, 4);
+  label := 'Thanksgiving Day';
+  return next;
+
+  -- Veterans Day, November 11 -- fixed-date, so the shift rule applies. Grouped
+  -- here rather than in the loop above only because it was added to the federal
+  -- list separately; the treatment is identical.
+  v_date := make_date(p_year, 11, 11);
+  holiday_date := case extract(dow from v_date)
+                    when 6 then v_date - 1
+                    when 0 then v_date + 1
+                    else v_date
+                  end;
+  label := 'Veterans Day';
+  return next;
+
+  return;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."federal_holidays_for_year"("p_year" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."federal_holidays_for_year"("p_year" integer) IS 'Returns the eleven U.S. federal holidays for any year, with the federal observed-shift rule (Saturday -> preceding Friday, Sunday -> following Monday) applied to the five fixed-date holidays. Pure computation, reads no tables, IMMUTABLE. Encoding the rule once rather than enumerating literal dates removes the silent-expiry cliff a bounded date list would carry -- business-day math would otherwise stop skipping holidays past the cliff with no error and no alert. Called by this migration''s backfill, by app-layer new-tenant provisioning (Decision 25.3''s "at provisioning"), and by the rolling annual top-up once pg_cron lands. The result is a STARTING DEFAULT that tenants edit -- it is not a claim about what any warrantor observes.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."get_user_tenant_id"() RETURNS "uuid"
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -65,6 +153,50 @@ $$;
 
 
 ALTER FUNCTION "public"."get_user_tenant_id"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."last_weekday_of_month"("p_year" integer, "p_month" integer, "p_dow" integer) RETURNS "date"
+    LANGUAGE "plpgsql" IMMUTABLE
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_last date := (make_date(p_year, p_month, 1) + interval '1 month - 1 day')::date;
+  v_back integer;
+begin
+  -- days back from the last day of the month to the preceding p_dow
+  v_back := (extract(dow from v_last)::integer - p_dow + 7) % 7;
+  return v_last - v_back;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."last_weekday_of_month"("p_year" integer, "p_month" integer, "p_dow" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."last_weekday_of_month"("p_year" integer, "p_month" integer, "p_dow" integer) IS 'Helper for federal_holidays_for_year(): the last occurrence of a given weekday in a given month. Memorial Day is the LAST Monday of May, which the Nth-weekday helper cannot express. dow follows extract(dow from date). Pure computation, IMMUTABLE.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."nth_weekday_of_month"("p_year" integer, "p_month" integer, "p_dow" integer, "p_n" integer) RETURNS "date"
+    LANGUAGE "plpgsql" IMMUTABLE
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_first date := make_date(p_year, p_month, 1);
+  v_offset integer;
+begin
+  -- days from the 1st to the first occurrence of p_dow
+  v_offset := (p_dow - extract(dow from v_first)::integer + 7) % 7;
+  return v_first + v_offset + (p_n - 1) * 7;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."nth_weekday_of_month"("p_year" integer, "p_month" integer, "p_dow" integer, "p_n" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."nth_weekday_of_month"("p_year" integer, "p_month" integer, "p_dow" integer, "p_n" integer) IS 'Helper for federal_holidays_for_year(): the Nth occurrence of a given weekday in a given month. dow follows extract(dow from date): 0 = Sunday .. 6 = Saturday. Pure computation, IMMUTABLE.';
+
 
 
 CREATE OR REPLACE FUNCTION "public"."protect_system_warranty_types"() RETURNS "trigger"
@@ -533,6 +665,27 @@ CREATE TABLE IF NOT EXISTS "public"."projects" (
 ALTER TABLE "public"."projects" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."tenant_holidays" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "holiday_date" "date" NOT NULL,
+    "label" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."tenant_holidays" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."tenant_holidays" IS 'Per-tenant holiday calendar (Decision 25.3). Business-day math skips Saturdays, Sundays, and any date in this table for the tenant in question. Extends the Tenant-Editable Defaults PHILOSOPHY (platform seeds at provisioning, tenant owns forever after, no propagation -- 17.A.3) but deliberately NOT its mechanics: no lock_tier, no is_system, no protection trigger, because no operational table references a holiday by FK. The seed is a STARTING DEFAULT, not a model of what warrantors observe -- no two companies recognize the same set, and every tenant edits from day one. A tenant may delete every row here; business-day math then skips weekends only.';
+
+
+
+COMMENT ON COLUMN "public"."tenant_holidays"."holiday_date" IS 'The concrete OBSERVED date the tenant is closed -- not the nominal calendar date of the holiday. The seed applies the federal observed-shift rule (Saturday -> preceding Friday, Sunday -> following Monday) to the four fixed-date holidays, because that is what OPM publishes and what most U.S. warrantors follow, so most tenants edit nothing. Tenants who differ edit rows: taking the Monday instead of the Friday changes this value, taking both adds a row, taking neither deletes. Storing observed dates rather than holiday rules is precisely what makes that variance expressible without any schema support.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."tenant_id_sequences" (
     "tenant_id" "uuid" NOT NULL,
     "id_type" "text" NOT NULL,
@@ -976,6 +1129,11 @@ ALTER TABLE ONLY "public"."projects"
 
 
 
+ALTER TABLE ONLY "public"."tenant_holidays"
+    ADD CONSTRAINT "tenant_holidays_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."tenant_id_sequences"
     ADD CONSTRAINT "tenant_id_sequences_pkey" PRIMARY KEY ("tenant_id", "id_type");
 
@@ -1154,6 +1312,14 @@ CREATE INDEX "projects_customer_id_idx" ON "public"."projects" USING "btree" ("c
 
 
 CREATE INDEX "projects_tenant_id_idx" ON "public"."projects" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "tenant_holidays_tenant_date_idx" ON "public"."tenant_holidays" USING "btree" ("tenant_id", "holiday_date");
+
+
+
+CREATE INDEX "tenant_holidays_tenant_id_idx" ON "public"."tenant_holidays" USING "btree" ("tenant_id");
 
 
 
@@ -1360,6 +1526,11 @@ ALTER TABLE ONLY "public"."projects"
 
 ALTER TABLE ONLY "public"."projects"
     ADD CONSTRAINT "projects_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."tenant_holidays"
+    ADD CONSTRAINT "tenant_holidays_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
 
@@ -1573,6 +1744,13 @@ ALTER TABLE "public"."projects" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "projects: members can view their tenant's rows" ON "public"."projects" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."tenant_holidays" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "tenant_holidays: tenant read" ON "public"."tenant_holidays" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -1922,6 +2100,12 @@ GRANT ALL ON TABLE "public"."invitations" TO "service_role";
 GRANT ALL ON TABLE "public"."projects" TO "anon";
 GRANT ALL ON TABLE "public"."projects" TO "authenticated";
 GRANT ALL ON TABLE "public"."projects" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."tenant_holidays" TO "anon";
+GRANT ALL ON TABLE "public"."tenant_holidays" TO "authenticated";
+GRANT ALL ON TABLE "public"."tenant_holidays" TO "service_role";
 
 
 
