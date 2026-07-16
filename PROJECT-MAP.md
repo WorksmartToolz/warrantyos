@@ -4,10 +4,10 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-16 (Chat 17), HEAD `a985970`, from verified git history
+**Last built:** 2026-07-16 (Chat 17), HEAD `4bcae5e`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (twenty-one tables + one view built). Not from memory or
-handoff summaries.
+construction is underway (twenty-two tables + one view + three functions built).
+Not from memory or handoff summaries.
 
 ---
 
@@ -20,14 +20,14 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first twenty-one tables (`contacts`, `projects`,
+construction has started**: the first twenty-two tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
 `warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
 `custom_field_definitions`, `claims`, `custom_field_values`,
 `inspection_types`, `inspection_triggers`, `work_plans`, `inspections`,
 `work_authorization_templates`, `work_authorization_documents`,
 `work_authorization_revisions`, `acknowledgment_gate_templates`,
-`acknowledgment_gate_records`) are
+`acknowledgment_gate_records`, `tenant_holidays`) are
 built, migrated, and committed —
 along with the `warranty_coverages_effective` view — with all FK constraints
 between them closed. The era is now building, not designing.
@@ -46,7 +46,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (21 tables + 1 view built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (22 tables + 1 view + 3 functions built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -62,7 +62,7 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 24** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 25** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
@@ -70,9 +70,10 @@ migrations (005, 006).
   **015_custom_field_definitions**, **016_claims**,
   **017_custom_field_values**, **018_inspection_types**,
   **019_inspection_triggers**, **020_work_plans**, **021_inspections**,
-  **022_customer_work_authorization**, and **023_acknowledgment_gate** (Phase 3
-  tables, the FK constraints closing them, and the
-  `warranty_coverages_effective` view).
+  **022_customer_work_authorization**, **023_acknowledgment_gate**, and
+  **024_tenant_holidays** (Phase 3 tables, the FK constraints closing them, the
+  `warranty_coverages_effective` view, and the three business-day calendar
+  functions).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
@@ -439,6 +440,50 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   12.7 step 5. **The application layer is not built:** 12.7's gate mechanics —
   the Server Action that renders or skips the gate and inserts the record on
   submission — remain, which is why the Status is `Implemented (schema)`.
+- **`tenant_holidays`** (024) — the per-tenant holiday calendar (Decision 25.3)
+  backing business-day math: the platform's business-day windows skip Saturdays,
+  Sundays, and any date in this table for the tenant in question. **Its own
+  migration, separate from the ALA tables**, per the 018/019
+  independent-siblings convention — it carries no FK to any ALA table and none
+  references it; the relationship is app-layer math only. ALA is the calendar's
+  first consumer, not its owner. **25.3 extends the Tenant-Editable Defaults
+  *philosophy*** (platform seeds at provisioning, tenant owns forever after, no
+  propagation — 17.A.3) **but explicitly not its *mechanics***, because no
+  operational table references a holiday by FK: hence no `lock_tier`, no
+  `is_system`, no protection trigger, no value/label pair, no `sort_order`. A
+  tenant may delete every row and the platform is fine with it — business-day
+  math then skips weekends only. **The seed is a starting default, not a model
+  of what warrantors observe.** No two companies recognize the same set (some
+  close Good Friday, some skip Columbus Day, some add company days), so the
+  platform seeds the U.S. federal list as the one defensible starting point and
+  the schema deliberately offers nothing that resists editing. **The seed applies
+  the federal observed-shift rule** (Saturday → preceding Friday, Sunday →
+  following Monday) to the five fixed-date holidays — what OPM publishes and
+  what most U.S. warrantors follow, so most tenants edit nothing. **Tenant policy
+  variance needs no schema support:** `holiday_date` stores a concrete *observed*
+  date, so taking the Monday instead of the Friday is a row edit, taking both
+  adds a row, taking neither deletes. **The dates are computed, not enumerated:**
+  `federal_holidays_for_year(integer)` plus helpers `nth_weekday_of_month` and
+  `last_weekday_of_month` (Memorial Day is the *last* Monday of May, which the
+  Nth helper cannot express) — all three IMMUTABLE, reading no tables. **A
+  literal date list was rejected because it needs an end year, and an end year
+  fails *silently*** — business-day math would stop skipping holidays past the
+  cliff with no error and no alert. The function has no cap. These are callables,
+  not triggers, so 17.A.6's no-triggers-at-v1 restraint does not bar them;
+  conventions per 011 (plpgsql, `set search_path = public`, no security definer).
+  **Verified in Postgres rather than asserted:** all 11 dates match OPM for 2026,
+  the backfill produces exactly 121 rows (11 × 11 years), and re-running inserts
+  0. **Year-boundary behavior is correct, not a defect** — when Jan 1 falls on a
+  Saturday the observed date shifts back into the prior year, so
+  `federal_holidays_for_year(2028)` returns `2027-12-31`; callers must not assume
+  year N's holidays fall within year N. **The 2026–2036 backfill is a starting
+  horizon, not a cap:** a rolling annual top-up calls the same function to extend
+  every tenant's list forward, but it **requires pg_cron, which is not yet
+  built** — so until that job lands the horizon is in fact what the backfill
+  wrote. **A real dependency, recorded rather than assumed away.** New-tenant
+  seeding is an app-layer provisioning step calling the same function — the same
+  convention as `tenant_id_sequences` (009) and the `warranty_types` anchor rows
+  (011), and what 25.3 means by "at provisioning".
 
 ---
 
