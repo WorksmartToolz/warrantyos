@@ -4327,6 +4327,72 @@ tenant's tenant_holidays table — a new per-tenant list, platform-seeded
 with U.S. federal holidays at provisioning, tenant-owned thereafter, same
 provisioning philosophy as the Tenant-Editable Defaults Pattern.
 
+**tenant_holidays is built (migration 024_tenant_holidays.sql), verbatim to
+Decision 25.3's six-column sketch.** It is a separate migration from the ALA
+tables because it carries no FK to any of them and none references it — the
+018/019 independent-siblings case rather than the 022 one-section-with-
+intra-section-FKs case. ALA is the calendar's first consumer, not its owner;
+any future business-day window reads the same table.
+
+25.3 extends the Tenant-Editable Defaults *philosophy* — platform seeds at
+provisioning, tenant owns forever after, no propagation (17.A.3) — but
+explicitly not that pattern's *mechanics*, because no operational table
+references a holiday by FK. The built table therefore carries no lock_tier,
+no is_system, no protection trigger, no value/label pair, and no sort_order.
+A tenant may delete every row; business-day math then skips weekends only.
+
+The seed is a starting default, not a model of what warrantors observe. No
+two companies recognize the same holiday set — some close Good Friday, some
+skip Columbus Day, some add company days, and on a holiday falling at a
+weekend some take the Friday before, some the Monday after, some neither,
+some both. The platform cannot know and does not assert. It seeds the U.S.
+federal list as the one defensible starting point for U.S. business, and the
+schema deliberately offers nothing that resists editing.
+
+**The seed applies the federal observed-shift rule** — Saturday shifts to the
+preceding Friday, Sunday to the following Monday — to the five fixed-date
+holidays (Jan 1, Jun 19, Jul 4, Nov 11, Dec 25). This is what OPM publishes
+and what most U.S. warrantors follow, so most tenants edit nothing; seeding
+unshifted calendar dates would hand every tenant the same correction to make.
+The remaining six are Nth-weekday holidays and never need the shift. Tenant
+policy variance needs no schema support at all: holiday_date stores a concrete
+*observed* date, so a tenant taking the Monday instead of the Friday edits one
+row, a tenant taking both adds a row, and a tenant taking neither deletes.
+Storing observed dates rather than holiday rules is precisely what makes that
+variance expressible.
+
+**The dates are computed, not enumerated.** Migration 024 adds
+public.federal_holidays_for_year(integer), returning the eleven federal
+holidays for any year with the shift rule applied, plus two helpers
+(nth_weekday_of_month, last_weekday_of_month — Memorial Day is the *last*
+Monday of May, which the Nth helper cannot express). All three are IMMUTABLE
+and read no tables. A literal date list was rejected because it would need an
+end year, and an end year fails *silently*: business-day math would simply
+stop skipping holidays past the cliff, producing wrong fires_at timestamps
+with no error and no alert. The function has no cap. These are callables, not
+triggers, so Decision 17.A.6's no-triggers-at-v1 restraint does not bar them;
+conventions follow migration 011 (plpgsql, set search_path = public, no
+security definer).
+
+Year-boundary behavior is correct, not a defect: when January 1 falls on a
+Saturday the observed date shifts backward into the previous year, so
+federal_holidays_for_year(2028) returns 2027-12-31 for New Year's Day. That is
+the real observed date and the tenant really is closed that Friday. Callers
+must not assume "year N's holidays" fall within year N.
+
+Migration 024 backfills 2026–2036 for tenants predating it — a one-time
+bootstrap (the 018/019 precedent), not the ongoing platform-to-tenant
+propagation 17.A.3 forbids, and idempotent via where-not-exists rather than
+011's on-conflict because there is no unique index to serve as arbiter.
+**That range is a starting horizon, not a cap:** the intended mechanic is a
+rolling annual top-up calling the same function to extend every tenant's list
+forward. The top-up requires pg_cron, whose enablement and handler function
+are separate Phase 3 work not yet built — so until that job lands, the horizon
+is in fact what the backfill wrote. This is a real dependency and is recorded
+as such. New-tenant seeding is an app-layer provisioning step calling the same
+function, the same convention as tenant_id_sequences (009) and the
+warranty_types anchor rows (011), and what 25.3 means by "at provisioning".
+
 If the window expires with claimant_decision still null, the
 ala_response_overdue clock event fires: overdue_flagged_at is set on the
 row, and the claimant receives an email explaining the window closed with
