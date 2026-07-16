@@ -4,9 +4,9 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-16 (Chat 16), HEAD `56dc7fe`, from verified git history
+**Last built:** 2026-07-16 (Chat 16), HEAD `1cada01`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (sixteen tables + one view built). Not from memory or
+construction is underway (nineteen tables + one view built). Not from memory or
 handoff summaries.
 
 ---
@@ -20,11 +20,13 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first sixteen tables (`contacts`, `projects`,
+construction has started**: the first nineteen tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
 `warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
 `custom_field_definitions`, `claims`, `custom_field_values`,
-`inspection_types`, `inspection_triggers`, `work_plans`, `inspections`) are
+`inspection_types`, `inspection_triggers`, `work_plans`, `inspections`,
+`work_authorization_templates`, `work_authorization_documents`,
+`work_authorization_revisions`) are
 built, migrated, and committed —
 along with the `warranty_coverages_effective` view — with all FK constraints
 between them closed. The era is now building, not designing.
@@ -43,7 +45,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (16 tables + 1 view built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (19 tables + 1 view built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -59,16 +61,16 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 22** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 23** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
   **012_warranty_coverages**, **013_clock_events**, **014_internal_teams**,
   **015_custom_field_definitions**, **016_claims**,
   **017_custom_field_values**, **018_inspection_types**,
-  **019_inspection_triggers**, **020_work_plans**, and **021_inspections**
-  (Phase 3 tables, the FK constraints closing them, and the
-  `warranty_coverages_effective` view).
+  **019_inspection_triggers**, **020_work_plans**, **021_inspections**, and
+  **022_customer_work_authorization** (Phase 3 tables, the FK constraints
+  closing them, and the `warranty_coverages_effective` view).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
@@ -314,6 +316,63 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   open), and no trigger enforcing the snapshot sync invariant (17.A.6: no
   triggers at v1). The tenant-match invariant and the canonical validation rule
   are app-layer.
+- **`work_authorization_templates`**, **`work_authorization_documents`**, and
+  **`work_authorization_revisions`** (022) — Customer Work Authorization
+  (Decision 11): the customer-facing **COMMITMENT** generated from a Work
+  Plan's **INTENT** (020). The two entities stay deliberately separate.
+  **Universal blocking gate:** no on-site activity of any kind proceeds without
+  an approved document for that specific event. SOP 1 names only the inspection
+  case; the architecture extends the gate to all on-site activity
+  intentionally — SOP 1 captured the canonical instance, not the limit.
+  Enforcement is a Server Action precondition, **not** a DB constraint.
+  **One-to-many with claims** — no UNIQUE on `claim_id`; each document
+  authorizes one bounded event (an inspection at one date, a repair execution
+  at another, a follow-up later). The deliberate contrast against
+  `ala_documents` and `service_reports`, which DO carry UNIQUE(claim_id): the
+  scope differs — ALA authorizes financial liability for the claim's
+  investigation (once per Indistinct outcome), Work Authorization authorizes
+  physical site presence for a bounded event (which recurs). Same shape as
+  `work_plans`. Three CHECKs on documents: `event_type` (3), `status` (7),
+  `customer_decision` (2). Templates carry the same
+  templates-and-documents shape as the ALA System and Acknowledgment Gate
+  Pattern, with **soft-delete required** — a template retired today may have
+  generated documents last year whose `template_snapshot` must stay readable.
+  **Decision 11.b resolved at build time:** `event_reference_id` is a **single
+  nullable column with app-layer dispatch and NO FK** — the only candidate
+  preserving the two-column shape (`event_type` + `event_reference_id`)
+  Decision 11 locks *by name*. A junction table would delete that column and
+  permit many-to-many, which this section forbids; typed per-event FK columns
+  would also delete it, and 017's typed-FK precedent does **not** transfer
+  because Decision 3 chose typed FKs where no locked column name was at stake.
+  In-repo precedent: `clock_events.entity_id` (013), also FK-less and resolved
+  by `entity_type`. **ON DELETE on all five FKs:** RESTRICT on `claim_id`,
+  `template_id`, and `revised_by_user_id`; **CASCADE** on
+  `work_authorization_document_id` (a revision is a dependent attribute of its
+  document, not an independent record — 017's entity-FK reasoning, deliberately
+  differing from the RESTRICTs); no clause on `event_reference_id`, which
+  carries no FK. Fifth canonical use of the Stateless Tokenized Interaction
+  Pattern; when a tenant configures an Acknowledgment Gate for `gate_purpose =
+  'work_authorization'` (Decision 12), that gate is an interstitial on
+  `customer_token` — **there is no second token**. The signature artifact is
+  `signer_name_typed` + `authorization_acknowledged`, deliberately distinct
+  from ALA's Accept/Decline + atomic signature + recant window (Decision 19):
+  different stakes, different ceremony; neither pre-decides the other.
+  Revise-and-resend is the **primary** recovery path for a denial, not
+  withdraw-and-recreate; the customer sees the full revision history on resend.
+  **Policy names use `<table>: tenant read`** — the convention's usual wording
+  exceeded PostgreSQL's 63-byte identifier cap on these table names and was
+  being silently truncated mid-word; the arch ref documents the convention as a
+  shape (`<table>: <who> can <action>`), not a fixed string. **Deliberate
+  omissions, documented in the migration header:** no partial UNIQUE on
+  `is_default` (app-layer, parallel to ALA's and Acknowledgment Gate's
+  identical open question), no customer FK and no O&M provider FK (direct field
+  capture is Decision 11's locked schema), no `work_plan_id` FK
+  (`event_reference_id` IS that reference), no DB CHECKs for the
+  denial/signature/conditional-field invariants (17.A.6 caps v1 DB
+  enforcement), and no `created_at`/`updated_at` on revisions (the locked
+  sketch carries only `revised_at` — built verbatim). O&M Provider approval is
+  blocked at v1 without a signed `om_authorization_documents` row (Decision
+  28); app-layer.
 
 ---
 
@@ -327,7 +386,6 @@ Type Coverages have now moved out of this list):
 - Claim Intake Data Model
 - ALA System (Decision 19)
 - Service Report Submission (Decision 21)
-- Customer Work Authorization (Decision 11)
 - Customer-O&M Authorization (Decision 28)
 - Tenant-Editable Defaults Pattern (Decision 17) — PARTIAL: the canonical lookup
   shape is built twice (`inspection_types` 018, `inspection_triggers` 019), and
@@ -375,11 +433,12 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 16 of ~20 tables built (contacts, projects,
+   tenant-editable defaults). 19 of ~20 tables built (contacts, projects,
    import_batches, tenant_id_sequences, warranty_registrations, warranty_types,
    warranty_coverages, clock_events, internal_teams, custom_field_definitions,
    claims, custom_field_values, inspection_types, inspection_triggers,
-   work_plans, inspections)
+   work_plans, inspections, work_authorization_templates,
+   work_authorization_documents, work_authorization_revisions)
    plus the warranty_coverages_effective view.
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
    event dispatcher, the entity UIs. (Includes new-tenant provisioning seeding
