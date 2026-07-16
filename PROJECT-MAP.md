@@ -4,9 +4,9 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-16 (Chat 16), HEAD `1cada01`, from verified git history
+**Last built:** 2026-07-16 (Chat 17), HEAD `a985970`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (nineteen tables + one view built). Not from memory or
+construction is underway (twenty-one tables + one view built). Not from memory or
 handoff summaries.
 
 ---
@@ -20,13 +20,14 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first nineteen tables (`contacts`, `projects`,
+construction has started**: the first twenty-one tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
 `warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
 `custom_field_definitions`, `claims`, `custom_field_values`,
 `inspection_types`, `inspection_triggers`, `work_plans`, `inspections`,
 `work_authorization_templates`, `work_authorization_documents`,
-`work_authorization_revisions`) are
+`work_authorization_revisions`, `acknowledgment_gate_templates`,
+`acknowledgment_gate_records`) are
 built, migrated, and committed —
 along with the `warranty_coverages_effective` view — with all FK constraints
 between them closed. The era is now building, not designing.
@@ -45,7 +46,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (19 tables + 1 view built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (21 tables + 1 view built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -61,16 +62,17 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 23** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 24** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
   **012_warranty_coverages**, **013_clock_events**, **014_internal_teams**,
   **015_custom_field_definitions**, **016_claims**,
   **017_custom_field_values**, **018_inspection_types**,
-  **019_inspection_triggers**, **020_work_plans**, **021_inspections**, and
-  **022_customer_work_authorization** (Phase 3 tables, the FK constraints
-  closing them, and the `warranty_coverages_effective` view).
+  **019_inspection_triggers**, **020_work_plans**, **021_inspections**,
+  **022_customer_work_authorization**, and **023_acknowledgment_gate** (Phase 3
+  tables, the FK constraints closing them, and the
+  `warranty_coverages_effective` view).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
@@ -373,6 +375,70 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   sketch carries only `revised_at` — built verbatim). O&M Provider approval is
   blocked at v1 without a signed `om_authorization_documents` row (Decision
   28); app-layer.
+- **`acknowledgment_gate_templates`** and **`acknowledgment_gate_records`**
+  (023) — the Acknowledgment Gate Pattern (Decision 12), a **Tier 1
+  platform-wide pattern**: the pre-form acknowledgment mechanism any tokenized
+  customer interaction can opt into, so that interactions do not each invent
+  their own. Tenant-defined content (the warrantor's legal/safety/operational
+  language) behind platform architecture. Same templates-and-records shape as
+  the ALA System and Customer Work Authorization (022), with **soft-delete
+  required on templates** — records captured last year must stay readable and
+  their `template_id` must still resolve. Phase 1 `gate_purpose` values:
+  `claim_submission`, `work_authorization`; extensible exactly like
+  `clock_events.event_type` (Decision 9). **Optional per tenant per purpose
+  (12.3)** — the platform supports gates natively but does not mandate them; a
+  tenant whose external compliance processes already handle the equivalent
+  acknowledgment leaves the purpose unconfigured and their customers proceed
+  straight to the form. **Decision 12.6 resolved at build time:**
+  `authorized_entity_id` is a **single polymorphic column with app-layer
+  dispatch and NO FK** — the only candidate preserving the two-column shape
+  (`authorized_entity_type` + `authorized_entity_id`) Decision 12 locks *by
+  name* in both schema sketches. A junction table would delete both columns and
+  permit many-to-many, which 12.4's one-gate-per-entity commitment forbids;
+  typed per-entity FK columns would also delete them, and 017's typed-FK
+  precedent does **not** transfer because Decision 3 chose typed FKs where no
+  locked column name was at stake. **The same reasoning and the same answer as
+  Decision 11.b on 022** — the structurally identical question; the deciding
+  test in both is whether the locked text names the column. In-repo precedent:
+  `clock_events.entity_id` (013). **Third consecutive polymorphic reference
+  answered the same way — a pattern, not a coincidence.** One deliberate
+  difference from 022: `authorized_entity_id` is **NOT NULL** where
+  `event_reference_id` is nullable — each built verbatim to its own locked
+  sketch, and an acknowledgment is by definition an acknowledgment *of*
+  something. **Do not harmonize.** **ON DELETE: RESTRICT** on
+  `records.template_id` (templates soft-delete; CASCADE would destroy the audit
+  record of what a customer agreed to — parallel to 022's `template_id` and
+  017's `definition_id`); no clause on `authorized_entity_id`, which carries no
+  FK. **No seed and no backfill — deliberately inverting 018/019**, whose
+  backfill was mandatory because `inspections.inspection_type_id` is NOT NULL
+  and a tenant with zero rows could not create an inspection at all. The inverse
+  holds here: 12.3 makes gates optional, **zero rows is a valid and expected
+  steady state**, and platform-seeded gate content would be the platform
+  imposing legal/safety language on tenants — precisely what 12.3 forbids.
+  **Deliberate omissions, documented in the migration header:** no FK on
+  `authorized_entity_id` (both targets — `claims` 016 and
+  `work_authorization_documents` 022 — now exist, so this is an architectural
+  choice, not a deferral for want of a target), no partial UNIQUE on
+  `is_default` (app-layer; parallel to 022's and ALA's identical flags — three
+  parallel flags, one answer), no UNIQUE on
+  `(authorized_entity_type, authorized_entity_id)` (12.4's one-gate-per-entity
+  is enforced by 12.7 step 3's Server Action existence check, the mechanic the
+  locked text specifies; 17.A.6 caps v1 DB enforcement), **no second token, no
+  second `expires_at`, no second `consumed_at`** (the gate is an interstitial on
+  the protected entity's existing tokenized link — 022's `customer_token` — not
+  its own tokenized interaction), no expiration or stale-out on records (an
+  acknowledgment is valid for the protected entity's lifetime), no `updated_at`
+  and no `deleted_at` on records (frozen audit artifacts, never edited or
+  retired — the locked sketch carries `created_at` only), no custom field
+  involvement (gates are tenant-defined documents, not fields on entities), and
+  **no CHECK coupling `acknowledger_name` to `requires_typed_name`, nor
+  `authorized_entity_type` to `gate_purpose`** — both pairs straddle the
+  template/record FK, so a DB CHECK cannot see both sides; app-layer per 17.A.6.
+  `acknowledged_at` is NOT NULL with **no default**, unlike `created_at` on the
+  same table — built verbatim to the locked sketch; the Server Action sets it at
+  12.7 step 5. **The application layer is not built:** 12.7's gate mechanics —
+  the Server Action that renders or skips the gate and inserts the record on
+  submission — remain, which is why the Status is `Implemented (schema)`.
 
 ---
 
@@ -394,8 +460,8 @@ Type Coverages have now moved out of this list):
   convention remains: the canonical validation helper, which is application-
   layer and does not yet exist. The Status moves to `Implemented (schema)` only
   when step 5 lands. `Inspections Foundation` has left this list entirely —
-  built as 021.
-- Acknowledgment Gate Pattern (Decision 12)
+  built as 021. `Acknowledgment Gate Pattern` has also left this list entirely —
+  built as 023.
 - Stateless Tokenized Interaction Pattern (applied, not yet coded)
 - FK + Snapshot Pattern, Feature Flag System, Database Migration Tooling, others
 
