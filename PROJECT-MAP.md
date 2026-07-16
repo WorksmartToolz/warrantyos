@@ -4,9 +4,9 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-16 (Chat 17), HEAD `4bcae5e`, from verified git history
+**Last built:** 2026-07-16 (Chat 18), HEAD `0c69213`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (twenty-two tables + one view + three functions built).
+construction is underway (twenty-five tables + one view + three functions built).
 Not from memory or handoff summaries.
 
 ---
@@ -20,14 +20,15 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first twenty-two tables (`contacts`, `projects`,
+construction has started**: the first twenty-five tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
 `warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
 `custom_field_definitions`, `claims`, `custom_field_values`,
 `inspection_types`, `inspection_triggers`, `work_plans`, `inspections`,
 `work_authorization_templates`, `work_authorization_documents`,
 `work_authorization_revisions`, `acknowledgment_gate_templates`,
-`acknowledgment_gate_records`, `tenant_holidays`) are
+`acknowledgment_gate_records`, `tenant_holidays`, `ala_templates`,
+`ala_documents`, `ala_document_revisions`) are
 built, migrated, and committed —
 along with the `warranty_coverages_effective` view — with all FK constraints
 between them closed. The era is now building, not designing.
@@ -46,7 +47,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (22 tables + 1 view + 3 functions built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (25 tables + 1 view + 3 functions built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -62,7 +63,7 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 25** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 26** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
@@ -70,10 +71,10 @@ migrations (005, 006).
   **015_custom_field_definitions**, **016_claims**,
   **017_custom_field_values**, **018_inspection_types**,
   **019_inspection_triggers**, **020_work_plans**, **021_inspections**,
-  **022_customer_work_authorization**, **023_acknowledgment_gate**, and
-  **024_tenant_holidays** (Phase 3 tables, the FK constraints closing them, the
-  `warranty_coverages_effective` view, and the three business-day calendar
-  functions).
+  **022_customer_work_authorization**, **023_acknowledgment_gate**,
+  **024_tenant_holidays**, and **025_ala_system** (Phase 3 tables, the FK
+  constraints closing them, the `warranty_coverages_effective` view, and the
+  three business-day calendar functions).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
@@ -484,6 +485,66 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   seeding is an app-layer provisioning step calling the same function — the same
   convention as `tenant_id_sequences` (009) and the `warranty_types` anchor rows
   (011), and what 25.3 means by "at provisioning".
+- **`ala_templates`**, **`ala_documents`**, and **`ala_document_revisions`**
+  (025) — the ALA System (Decisions 19/25/26): the Owner's Consent and
+  Assumption of Liability Agreement, which a claimant signs when a claim's
+  causation or ownership is unclear, accepting financial responsibility for the
+  investigation if the defect is ultimately found outside warranty scope. The
+  SOPs call this the Indistinct Claims workflow. **An ALA exists only when a
+  claim's outcome is Indistinct — most claims never have one.** Third and final
+  instance of the templates-and-documents shape (after 022 and 023), with
+  soft-delete required on templates. **UNIQUE on `claim_id` — and Decision 26.2
+  explicitly refuses to reopen it:** one row per claim, always. The deliberate
+  contrast against `work_authorization_documents` (022), which is one-to-many
+  because it authorizes a bounded, recurring on-site event; an ALA authorizes
+  financial liability for the claim's investigation, once per Indistinct
+  outcome. Content changes go through revise-and-resend (Decision 26), never a
+  second row. **`ala_documents` carries 20 columns, not the arch ref sketch's
+  19** — `overdue_flagged_at` is named in **Decision 25.4's prose only**, and
+  the sketch predates it; the sketch was corrected in the same commit so the
+  two locked sources agree. **No `status` column, deliberately (19.7):** the
+  three-state machine is **derived** — unsigned (`claimant_decision` null AND
+  `signed_at` null), signed (`'accepted'` AND `signed_at` non-null), declined
+  (`'declined'` AND `signed_at` null). Those three are the complete state set;
+  `overdue_flagged_at` is a **fourth orthogonal signal layered on the unsigned
+  state, not a fourth state** (25.4) — a pure marker that changes neither
+  decision nor signature and does **not** unblock the Indistinct gate. Silence
+  never becomes a decision (25.8): there is no auto-terminal state; the flag
+  persists until the warrantor re-issues (25.7) or escalates manually.
+  `markup_percent_snapshot numeric(4,3)` is the **first non-uuid/text/jsonb/
+  bool/timestamptz/date type in Phase 3**, freezing Decision 7's 10% default at
+  generation; the 0–0.50 bounds are app-layer (the type constrains precision,
+  not the architectural bounds). `signature_method` is a platform-locked CHECK
+  enum **with a default** — only 022's `status` precedes that shape — captured
+  from the tenant's setting at row creation and frozen for the document's
+  lifetime. **ON DELETE, all from precedent:** RESTRICT on `claim_id`
+  (010/016/020/021/022 — the arch ref defers only the clause, naming the
+  parallel) and `template_id` (022/023/017); **CASCADE** on
+  `revisions.ala_document_id` (a revision is a dependent attribute, not an
+  independent record — 022's revisions, identical shape); RESTRICT on
+  `revised_by_user_id` (022). **No `alter table` was needed:** `clock_events`
+  (013) already carried `ala_document`, `ala_response_overdue`, and
+  `ala_decline_window_expired`. **Deliberate omissions, documented in the
+  migration header:** no `status` column (see above), no counter-signature
+  column (the ALA is one-sided consent — a warrantor signature would change the
+  instrument), no partial UNIQUE on `is_default` (**the third parallel flag**,
+  after 022's and 023's — identical question, identical app-layer answer), no
+  DB CHECK for "accepted ⇒ `signed_at` non-null" (Decision 19.1's atomic
+  accept-and-signature write is a Server Action invariant; 17.A.6 caps v1 DB
+  enforcement), no CHECKs coupling the signature artifacts to
+  `signature_method`, no `created_at`/`updated_at` on revisions (the locked
+  26.1 sketch carries `revised_at` only — built verbatim, as with 022), no
+  `deleted_at` on documents (an audit-bearing legal artifact for the warranty
+  horizon; revise-in-place is the content-change path) or on revisions (frozen
+  audit artifacts), no DB enforcement of the markup bounds, no second token for
+  an Acknowledgment Gate (an interstitial on `claimant_token`, per 022's rule),
+  and no holiday FK — business-day math reads `tenant_holidays` (024)
+  app-layer at the moment `fires_at` is computed, **which is exactly why 024
+  and 025 are separate migrations.** Revising a **signed** ALA is blocked at v1
+  (26.4). **The application layer is not built** — document generation at the
+  Indistinct outcome, the tokenized Accept/Decline atomic write, the
+  dispatcher's overdue flagging, re-issue, and revision capture all remain,
+  which is why the Status is `Implemented (schema)`.
 
 ---
 
@@ -495,7 +556,6 @@ does not (contacts, projects, ID Generation, Warranty Registration, and Warranty
 Type Coverages have now moved out of this list):
 
 - Claim Intake Data Model
-- ALA System (Decision 19)
 - Service Report Submission (Decision 21)
 - Customer-O&M Authorization (Decision 28)
 - Tenant-Editable Defaults Pattern (Decision 17) — PARTIAL: the canonical lookup
@@ -544,13 +604,18 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 19 of ~20 tables built (contacts, projects,
+   tenant-editable defaults). 25 tables built — the original "~20" estimate
+   undercounted, since several sections carry three tables each (contacts,
+   projects,
    import_batches, tenant_id_sequences, warranty_registrations, warranty_types,
    warranty_coverages, clock_events, internal_teams, custom_field_definitions,
    claims, custom_field_values, inspection_types, inspection_triggers,
    work_plans, inspections, work_authorization_templates,
-   work_authorization_documents, work_authorization_revisions)
-   plus the warranty_coverages_effective view.
+   work_authorization_documents, work_authorization_revisions,
+   acknowledgment_gate_templates, acknowledgment_gate_records, tenant_holidays,
+   ala_templates, ala_documents, ala_document_revisions)
+   plus the warranty_coverages_effective view and the three business-day
+   calendar functions.
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
    event dispatcher, the entity UIs. (Includes new-tenant provisioning seeding
    for both `tenant_id_sequences` and the two `warranty_types` anchor rows, per
