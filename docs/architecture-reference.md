@@ -4382,7 +4382,15 @@ Parallel to the deliberate-omissions lists elsewhere:
 
 ## Inspections Foundation
 
-**Status: Designed.** This section locks the inspections table foundation,
+**Status: Implemented (schema)** (the inspections table, its three
+platform-locked CHECK enums, the two Tenant-Editable Defaults FK + snapshot
+column pairs, inspection_report JSONB, two indexes, and the Standard RLS
+Pattern's six steps are built in migration 021. ON DELETE on claim_id was
+resolved at build time as RESTRICT, matching the 010/016/020 precedent and the
+restraint this section names; the two lookup FKs are RESTRICT per this
+section's own statement that hard-deletion is not an ordinary path. Server
+Actions capturing the snapshots and the state machine's transitions are not yet
+built.) This section locks the inspections table foundation,
 with the architecture having evolved through several Phase 3 decisions.
 The schema (the five enum-like columns plus inspection_report JSONB),
 each column's pattern assignment, and the cross-entity dependencies are
@@ -6732,10 +6740,14 @@ canonical lookup table shape is built: both canonical applications exist as
 migrations -- inspection_types (018) and inspection_triggers (019) per
 Decision 17 Part B -- each carrying the canonical column set verbatim, the
 lock_tier CHECK, the Standard RLS Pattern's six steps, and a backfill of the
-platform_locked defaults for tenants predating the migration. Steps 4 and 5
-of the six-step convention below remain unbuilt: the operational table
-(inspections) does not yet carry its FK + value snapshot columns, and the
-canonical validation helper does not yet exist. Per Decision 17.A.6 no
+platform_locked defaults for tenants predating the migration. Step 4 of the
+six-step convention below is now built: the operational table (inspections,
+migration 021) carries both FK + value snapshot column pairs in the shape the
+"Operational table integration via FK + Snapshot" subsection specifies, with
+ON DELETE RESTRICT on both lookup FKs per this pattern's soft-delete
+semantics. Step 5 remains unbuilt: the canonical validation helper is
+application-layer and does not yet exist, so the status stays Partially
+implemented until it lands. Per Decision 17.A.6 no
 PostgreSQL triggers are introduced at v1; the lookup tables are in their
 final schema shape, so the future migration to trigger enforcement remains
 a pure DB-layer change. Logical placement is alongside the other Tier 1

@@ -341,6 +341,57 @@ COMMENT ON COLUMN "public"."inspection_types"."deleted_at" IS 'Soft-delete. Appl
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."inspections" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "claim_id" "uuid" NOT NULL,
+    "performed_by" "text" NOT NULL,
+    "paid_by" "text" NOT NULL,
+    "inspection_type_id" "uuid" NOT NULL,
+    "inspection_type_value" "text" NOT NULL,
+    "inspection_trigger_id" "uuid" NOT NULL,
+    "inspection_trigger_value" "text" NOT NULL,
+    "status" "text" DEFAULT 'open'::"text" NOT NULL,
+    "inspection_report" "jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "inspections_paid_by_check" CHECK (("paid_by" = ANY (ARRAY['warrantor'::"text", 'claimant'::"text", 'third_party'::"text"]))),
+    CONSTRAINT "inspections_performed_by_check" CHECK (("performed_by" = ANY (ARRAY['warrantor'::"text", 'third_party'::"text"]))),
+    CONSTRAINT "inspections_status_check" CHECK (("status" = ANY (ARRAY['open'::"text", 'in_progress'::"text", 'under_review'::"text", 'issued'::"text"])))
+);
+
+
+ALTER TABLE "public"."inspections" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."inspections" IS 'A claim-level investigation into a defect''s cause, scope, or fix (Decision 17 Part B, Decision 18). Used when a claim''s information is insufficient to determine corrective actions, or when an Indistinct claim needs investigation before warranty determination. Zero, one, or many per claim. The canonical reference example for the Tenant-Editable Defaults role-based decision tree: five enum-like columns across three patterns.';
+
+
+
+COMMENT ON COLUMN "public"."inspections"."performed_by" IS 'WHO PERFORMS the inspection: warrantor (own personnel) or third_party (an external expert, subcontractor, structural engineer, manufacturer''s rep, or independent investigator). Platform-locked CHECK enum — a structural axis universal across warrantor business models. Orthogonal to paid_by: every performer/payer combination is operationally real and valid.';
+
+
+
+COMMENT ON COLUMN "public"."inspections"."paid_by" IS 'WHO PAYS for the inspection: warrantor, claimant, or third_party (vendor reimbursement, insurer-funded, or similar cases where cost is borne by a party external to the warrantor-claimant relationship). Platform-locked CHECK enum — a structural axis. Read by the Tier 3 cost-tracking section to determine the cost recovery path. Orthogonal to performed_by.';
+
+
+
+COMMENT ON COLUMN "public"."inspections"."inspection_type_value" IS 'Snapshot of inspection_types.value at row creation (FK + Snapshot Pattern). Never updated on read, never re-synced when the lookup row changes. Lets cross-tenant analytics filter on value without joining the per-tenant lookup table; per-tenant queries reading the current label join through the FK.';
+
+
+
+COMMENT ON COLUMN "public"."inspections"."inspection_trigger_value" IS 'Snapshot of inspection_triggers.value at row creation (FK + Snapshot Pattern). Never re-synced. Also answers the WHO-asked question per Decision 18.2 — Customer Request implies claimant-initiated, Third Party implies external-party-initiated, the remaining trigger values imply warrantor-initiated. There is deliberately no requested_by column.';
+
+
+
+COMMENT ON COLUMN "public"."inspections"."status" IS 'Platform-locked workflow-driver enum. open (created, awaiting activity; subsumes the original enum''s requested and scheduled, since no field work has happened in either) -> in_progress (field work actively underway, regardless of session count) -> under_review (observations captured, internal review and documentation drafting) -> issued (documentation finalized and released to customer; terminal on the happy path — some tenant vocabularies call this document a Non-Conformance Report). Backward transitions are not part of the architectural commitment at this layer.';
+
+
+
+COMMENT ON COLUMN "public"."inspections"."inspection_report" IS 'Per-inspection findings as JSONB, because inspection shapes capture different things: pile depths and soil conditions on a foundation issue, load calculations and failure mode analysis on a racking failure, a contracted investigator''s narrative elsewhere. Also the flexibility mechanism in lieu of custom fields (Audit Topic 11), and the operational home for claimant attendance if a tenant tracks it (Decision 18.1).';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."internal_teams" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -712,6 +763,11 @@ ALTER TABLE ONLY "public"."inspection_types"
 
 
 
+ALTER TABLE ONLY "public"."inspections"
+    ADD CONSTRAINT "inspections_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."internal_teams"
     ADD CONSTRAINT "internal_teams_pkey" PRIMARY KEY ("id");
 
@@ -850,6 +906,14 @@ CREATE INDEX "inspection_types_tenant_id_idx" ON "public"."inspection_types" USI
 
 
 
+CREATE INDEX "inspections_claim_id_idx" ON "public"."inspections" USING "btree" ("claim_id");
+
+
+
+CREATE INDEX "inspections_tenant_id_idx" ON "public"."inspections" USING "btree" ("tenant_id");
+
+
+
 CREATE INDEX "internal_teams_tenant_id_idx" ON "public"."internal_teams" USING "btree" ("tenant_id");
 
 
@@ -980,6 +1044,26 @@ ALTER TABLE ONLY "public"."inspection_triggers"
 
 ALTER TABLE ONLY "public"."inspection_types"
     ADD CONSTRAINT "inspection_types_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."inspections"
+    ADD CONSTRAINT "inspections_claim_id_fkey" FOREIGN KEY ("claim_id") REFERENCES "public"."claims"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."inspections"
+    ADD CONSTRAINT "inspections_inspection_trigger_id_fkey" FOREIGN KEY ("inspection_trigger_id") REFERENCES "public"."inspection_triggers"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."inspections"
+    ADD CONSTRAINT "inspections_inspection_type_id_fkey" FOREIGN KEY ("inspection_type_id") REFERENCES "public"."inspection_types"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."inspections"
+    ADD CONSTRAINT "inspections_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
 
@@ -1146,6 +1230,13 @@ ALTER TABLE "public"."inspection_types" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "inspection_types: members can view their tenant's rows" ON "public"."inspection_types" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."inspections" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "inspections: members can view their tenant's rows" ON "public"."inspections" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -1459,6 +1550,12 @@ GRANT ALL ON TABLE "public"."inspection_triggers" TO "service_role";
 GRANT ALL ON TABLE "public"."inspection_types" TO "anon";
 GRANT ALL ON TABLE "public"."inspection_types" TO "authenticated";
 GRANT ALL ON TABLE "public"."inspection_types" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."inspections" TO "anon";
+GRANT ALL ON TABLE "public"."inspections" TO "authenticated";
+GRANT ALL ON TABLE "public"."inspections" TO "service_role";
 
 
 
