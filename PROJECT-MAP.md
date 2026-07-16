@@ -4,9 +4,9 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-15 (Chat 15), HEAD `a18dd76`, from verified git history
+**Last built:** 2026-07-15 (Chat 15), HEAD `61b3056`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (fourteen tables + one view built). Not from memory or
+construction is underway (fifteen tables + one view built). Not from memory or
 handoff summaries.
 
 ---
@@ -20,11 +20,11 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first fourteen tables (`contacts`, `projects`,
+construction has started**: the first fifteen tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
 `warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
 `custom_field_definitions`, `claims`, `custom_field_values`,
-`inspection_types`, `inspection_triggers`) are built,
+`inspection_types`, `inspection_triggers`, `work_plans`) are built,
 migrated, and committed —
 along with the `warranty_coverages_effective` view — with all FK constraints
 between them closed. The era is now building, not designing.
@@ -43,7 +43,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (14 tables + 1 view built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (15 tables + 1 view built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -59,15 +59,15 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 20** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 21** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
   **012_warranty_coverages**, **013_clock_events**, **014_internal_teams**,
   **015_custom_field_definitions**, **016_claims**,
-  **017_custom_field_values**, **018_inspection_types**, and
-  **019_inspection_triggers** (Phase 3 tables, the FK constraints closing
-  them, and the `warranty_coverages_effective` view).
+  **017_custom_field_values**, **018_inspection_types**,
+  **019_inspection_triggers**, and **020_work_plans** (Phase 3 tables, the FK
+  constraints closing them, and the `warranty_coverages_effective` view).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
@@ -225,6 +225,41 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   enforcement at the lock_tier value set, NOT NULLs, and FK integrity). New-
   tenant seeding, the slugification of `label`→`value` for tenant_added rows,
   and the canonical validation helper are app-layer.
+- **`work_plans`** (020) — the warrantor's **INTENT**: the planned corrective
+  actions for a claim (Decisions 13/15/16; SOP 6). Customer Work Authorization
+  (Decision 11) is the customer-facing **COMMITMENT** generated from that
+  intent — the two entities stay deliberately separate. Built verbatim to the
+  arch ref schema sketch: 22 columns, all eight SOP 6 components mapped. **Five
+  CHECKs** — `execution_path` (Decision 13.2's four values, v1's Four Work Plan
+  Execution Paths), `work_plan_type` (3), `status` (Decision 15.1's five
+  values), plus the **two conditional path CHECKs** Decision 13.1 requires
+  (`internal_team_id` non-null exactly when
+  `execution_path = 'warrantor_self_performs'`; `subcontractor_contact_id`
+  non-null exactly on the two subcontractor paths — **both null** on
+  `customer_self_services`, where the customer-as-executor resolves through the
+  claim's parent project). Standard RLS Pattern applied.
+  **ON DELETE resolved at build time on all four entity FKs as RESTRICT**
+  (`claim_id`, `internal_team_id`, `subcontractor_contact_id`,
+  `warranty_professional_user_id`), closing four questions the arch ref had
+  flagged as "Phase 3 implementation detail". Every parent soft-deletes or
+  soft-removes, and the arch ref states the restraint plainly: hard-deletion
+  isn't an ordinary path. Matches the 010/016 precedent. On `internal_team_id`
+  RESTRICT is the **only architecturally available** clause, not merely the
+  preferred one — Decision 13.3 requires soft-delete *precisely so* historical
+  `work_plans` retain the FK when teams retire; CASCADE would destroy exactly
+  those rows, and SET NULL would violate the conditional CHECK, leaving the row
+  unrepresentable. **Deliberate omissions, documented in the migration
+  header:** no UNIQUE on `claim_id` (one-to-many is locked — each Work Plan
+  bounds one execution event; differs from `ala_documents` and
+  `service_reports`, which DO carry UNIQUE(claim_id) because those bound the
+  claim as a whole), no `work_authorization_id` FK (Decision 11 runs it the
+  other way via `event_reference_id`), no `notice_of_defect_id` FK (Decision
+  14.4: **no FK in either direction** — the operational sequence is read from
+  claim history), no `service_report_id` FK, no customer FK, and no
+  `submitted` / `in_execution` / `scheduled` / `revised` / `resent` status
+  values (excluded by 15.2, 15.3, 15.4, 15.5 respectively). Parts Claims are
+  excluded from this workflow entirely (Decision 16.3) — app-layer, not a DB
+  constraint coupling this table to the parent's `claim_type`.
 
 ---
 
@@ -240,8 +275,6 @@ Type Coverages have now moved out of this list):
 - Inspections Foundation (Decision 17)
 - Service Report Submission (Decision 21)
 - Customer Work Authorization (Decision 11)
-- Work Plan Workflow (Decisions 13–16) — PARTIAL: `internal_teams` built (014);
-  `work_plans` remains
 - Customer-O&M Authorization (Decision 28)
 - Tenant-Editable Defaults Pattern (Decision 17) — PARTIAL: the canonical lookup
   shape is built twice (`inspection_types` 018, `inspection_triggers` 019);
@@ -287,10 +320,11 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 14 of ~20 tables built (contacts, projects,
+   tenant-editable defaults). 15 of ~20 tables built (contacts, projects,
    import_batches, tenant_id_sequences, warranty_registrations, warranty_types,
    warranty_coverages, clock_events, internal_teams, custom_field_definitions,
-   claims, custom_field_values, inspection_types, inspection_triggers)
+   claims, custom_field_values, inspection_types, inspection_triggers,
+   work_plans)
    plus the warranty_coverages_effective view.
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
    event dispatcher, the entity UIs. (Includes new-tenant provisioning seeding
