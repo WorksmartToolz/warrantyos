@@ -450,8 +450,8 @@ CREATE TABLE IF NOT EXISTS "public"."clock_events" (
     "payload" "jsonb",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "clock_events_entity_type_check" CHECK (("entity_type" = ANY (ARRAY['project'::"text", 'claim'::"text", 'warranty_coverage'::"text", 'work_authorization_document'::"text", 'service_report'::"text", 'ala_document'::"text", 'warranty_registration'::"text"]))),
-    CONSTRAINT "clock_events_event_type_check" CHECK (("event_type" = ANY (ARRAY['registration_prep_pre_trigger'::"text", 'info_request_due'::"text", 'warranty_expiry_warning'::"text", 'trigger_confirmation_overdue'::"text", 'service_report_response_due'::"text", 'work_authorization_response_overdue'::"text", 'ala_decline_window_expired'::"text", 'ala_response_overdue'::"text", 'warranty_id_early_issuance'::"text"]))),
+    CONSTRAINT "clock_events_entity_type_check" CHECK (("entity_type" = ANY (ARRAY['project'::"text", 'claim'::"text", 'warranty_coverage'::"text", 'work_authorization_document'::"text", 'service_report'::"text", 'ala_document'::"text", 'warranty_registration'::"text", 'notice_of_defect'::"text"]))),
+    CONSTRAINT "clock_events_event_type_check" CHECK (("event_type" = ANY (ARRAY['registration_prep_pre_trigger'::"text", 'info_request_due'::"text", 'warranty_expiry_warning'::"text", 'trigger_confirmation_overdue'::"text", 'service_report_response_due'::"text", 'work_authorization_response_overdue'::"text", 'ala_decline_window_expired'::"text", 'ala_response_overdue'::"text", 'warranty_id_early_issuance'::"text", 'notice_of_defect_response_overdue'::"text"]))),
     CONSTRAINT "clock_events_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'fired'::"text", 'cancelled'::"text", 'failed'::"text"])))
 );
 
@@ -728,6 +728,67 @@ COMMENT ON COLUMN "public"."invitations"."consumed_at" IS 'Set when the invited 
 
 
 COMMENT ON COLUMN "public"."invitations"."invited_by" IS 'User who created this invitation. NULL for platform-admin-issued invitations.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."notices_of_defect" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "claim_id" "uuid" NOT NULL,
+    "recipient_contact_id" "uuid",
+    "recipient_user_id" "uuid",
+    "recipient_name_snapshot" "text" NOT NULL,
+    "recipient_email_snapshot" "text" NOT NULL,
+    "recipient_company_snapshot" "text",
+    "notified_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "notified_by_user_id" "uuid" NOT NULL,
+    "claim_summary_snapshot" "jsonb" NOT NULL,
+    "notification_message" "jsonb",
+    "response_status" "text" DEFAULT 'pending'::"text" NOT NULL,
+    "response_at" timestamp with time zone,
+    "response_explanation" "jsonb",
+    "recipient_token" "text",
+    "recipient_token_expires_at" timestamp with time zone,
+    "expected_response_date" "date" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "notices_of_defect_recipient_check" CHECK ((("recipient_contact_id" IS NOT NULL) <> ("recipient_user_id" IS NOT NULL))),
+    CONSTRAINT "notices_of_defect_response_status_check" CHECK (("response_status" = ANY (ARRAY['pending'::"text", 'accepted'::"text", 'rejected'::"text"])))
+);
+
+
+ALTER TABLE "public"."notices_of_defect" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."notices_of_defect" IS 'The warrantor''s formal notification to a believed-responsible party: "this defect is yours; respond with acceptance/rejection" (Decision 14). An AUDIT ARTIFACT OF OFFICIAL NOTIFICATION -- the purpose is that the party believed responsible has been officially notified and that is a matter of record, separate from any downstream execution work. v1 modeled this as two fields on the Work Plan; the Phase 1 audit flagged that as structurally wrong -- a Notice of Defect is a document sent to a party, with its own lifecycle, response, and audit trail. One-to-many with claims (14.1): zero when the defect is the warrantor''s own responsibility, many as the responsibility picture evolves. NO FK to work_plans in either direction (14.4): the Notice''s architectural responsibility ends at response capture, and some Notices never lead to a Work Plan at all.';
+
+
+
+COMMENT ON COLUMN "public"."notices_of_defect"."recipient_contact_id" IS 'Dual-FK recipient with an UNCONDITIONAL XOR (14.2): exactly one of recipient_contact_id / recipient_user_id is non-null. Deliberately differs from 010''s dual-FK assignee CHECK, which gates on status (both null when pre_activation) -- that conditionality is Decision 23.7''s four-state registration machine, which this entity has no analogue to. A Notice without a recipient is not a thing that exists. The `<>` idiom transfers from 010; the status gate does not. DO NOT HARMONIZE.';
+
+
+
+COMMENT ON COLUMN "public"."notices_of_defect"."recipient_name_snapshot" IS 'FK + Snapshot (14.2, Decision 1 broadened). Frozen at notification time and never re-synced: the FK preserves the relationship for reporting, the snapshot preserves who was actually notified, at that address, on that date -- the entire audit-defensibility point of a matter-of-record notification. Same convention as inspections (021).';
+
+
+
+COMMENT ON COLUMN "public"."notices_of_defect"."notified_at" IS 'The matter-of-record moment -- the column this entity exists for. NOT NULL with a default: a row''s existence IS the notification having happened. Note there is no separate status column tracking sent-ness; the Notice''s own lifecycle is its response_status.';
+
+
+
+COMMENT ON COLUMN "public"."notices_of_defect"."claim_summary_snapshot" IS 'Frozen snapshot of the claim information shared with the recipient at notification. The column and its NOT NULL are locked; the internal JSONB shape (which claim fields are captured) is a flagged Phase 3 implementation detail, same treatment as inspections.inspection_report (021) and work_authorization_revisions.field_changes (022).';
+
+
+
+COMMENT ON COLUMN "public"."notices_of_defect"."response_status" IS 'Three values, exactly: pending | accepted | rejected (14.3). Binding at the moment of response, but NOT closure-binding -- a recipient may accept, get to site, and shift position. Such changes are NOT revisions to this column: they become NEW events (a new Notice to another party, a claim status transition, an escalation), each in its own section, and the historical record of the original response is preserved intact. That is why this entity has no revisions child table, deliberately unlike work_authorization_revisions (022) and ala_document_revisions (025). There is no ''withdrawn'' value: a matter of record is not un-sent.';
+
+
+
+COMMENT ON COLUMN "public"."notices_of_defect"."recipient_token" IS 'Stateless Tokenized Interaction Pattern (14.5) -- the recipient receives a tokenized email link to respond, and needs no account. Stored on this row per the pattern''s "shape to copy, not shared store" rule, parallel to work_authorization_documents.customer_token (022) and ala_documents.claimant_token (025). Decision 14 calls this the sixth canonical use, as do Decisions 19 (ALA) and 28 (seventh, O&M): the ordinals collide because the decisions were drafted in different sessions. The collision is a numbering artifact, not a conflict -- each entity''s token columns are independently locked.';
+
+
+
+COMMENT ON COLUMN "public"."notices_of_defect"."expected_response_date" IS 'NOT NULL per 14.7: every Notice of Defect has a warrantor-set response deadline. Drives notice_of_defect_response_overdue firing, which the Server Action that sends the notification schedules into clock_events.';
 
 
 
@@ -1238,6 +1299,11 @@ ALTER TABLE ONLY "public"."invitations"
 
 
 
+ALTER TABLE ONLY "public"."notices_of_defect"
+    ADD CONSTRAINT "notices_of_defect_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."projects"
     ADD CONSTRAINT "projects_pkey" PRIMARY KEY ("id");
 
@@ -1438,6 +1504,22 @@ CREATE INDEX "invitations_tenant_id_idx" ON "public"."invitations" USING "btree"
 
 
 CREATE INDEX "invitations_token_idx" ON "public"."invitations" USING "btree" ("token");
+
+
+
+CREATE INDEX "notices_of_defect_claim_id_idx" ON "public"."notices_of_defect" USING "btree" ("claim_id");
+
+
+
+CREATE INDEX "notices_of_defect_recipient_contact_id_idx" ON "public"."notices_of_defect" USING "btree" ("recipient_contact_id") WHERE ("recipient_contact_id" IS NOT NULL);
+
+
+
+CREATE INDEX "notices_of_defect_recipient_user_id_idx" ON "public"."notices_of_defect" USING "btree" ("recipient_user_id") WHERE ("recipient_user_id" IS NOT NULL);
+
+
+
+CREATE INDEX "notices_of_defect_tenant_id_idx" ON "public"."notices_of_defect" USING "btree" ("tenant_id");
 
 
 
@@ -1680,6 +1762,31 @@ ALTER TABLE ONLY "public"."invitations"
 
 ALTER TABLE ONLY "public"."invitations"
     ADD CONSTRAINT "invitations_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."notices_of_defect"
+    ADD CONSTRAINT "notices_of_defect_claim_id_fkey" FOREIGN KEY ("claim_id") REFERENCES "public"."claims"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."notices_of_defect"
+    ADD CONSTRAINT "notices_of_defect_notified_by_user_id_fkey" FOREIGN KEY ("notified_by_user_id") REFERENCES "public"."users"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."notices_of_defect"
+    ADD CONSTRAINT "notices_of_defect_recipient_contact_id_fkey" FOREIGN KEY ("recipient_contact_id") REFERENCES "public"."contacts"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."notices_of_defect"
+    ADD CONSTRAINT "notices_of_defect_recipient_user_id_fkey" FOREIGN KEY ("recipient_user_id") REFERENCES "public"."users"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."notices_of_defect"
+    ADD CONSTRAINT "notices_of_defect_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
 
 
@@ -1927,6 +2034,13 @@ ALTER TABLE "public"."invitations" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "invitations: members can view their tenant's invitations" ON "public"."invitations" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."notices_of_defect" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "notices_of_defect: tenant read" ON "public"."notices_of_defect" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -2302,6 +2416,12 @@ GRANT ALL ON TABLE "public"."internal_teams" TO "service_role";
 GRANT ALL ON TABLE "public"."invitations" TO "anon";
 GRANT ALL ON TABLE "public"."invitations" TO "authenticated";
 GRANT ALL ON TABLE "public"."invitations" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."notices_of_defect" TO "anon";
+GRANT ALL ON TABLE "public"."notices_of_defect" TO "authenticated";
+GRANT ALL ON TABLE "public"."notices_of_defect" TO "service_role";
 
 
 
