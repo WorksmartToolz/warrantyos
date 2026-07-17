@@ -4,9 +4,11 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-16 (Chat 18), HEAD `4a65f45`, from verified git history
+**Last built:** 2026-07-17 (Chat 19), HEAD `965ef68`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
 construction is underway (twenty-six tables + one view + three functions built).
+The table count did not change at 027: it added 25 columns to the `claims`
+shell rather than creating a table.
 Not from memory or handoff summaries.
 
 ---
@@ -72,8 +74,9 @@ migrations (005, 006).
   **017_custom_field_values**, **018_inspection_types**,
   **019_inspection_triggers**, **020_work_plans**, **021_inspections**,
   **022_customer_work_authorization**, **023_acknowledgment_gate**,
-  **024_tenant_holidays**, **025_ala_system**, and
-  **026_notices_of_defect** (Phase 3 tables, the FK constraints closing them,
+  **024_tenant_holidays**, **025_ala_system**,
+  **026_notices_of_defect**, and **027_claim_intake** (Phase 3 tables, the FK
+  constraints closing them,
   the `warranty_coverages_effective` view, and the three business-day calendar
   functions).
 
@@ -181,9 +184,60 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   customer's own self-report — `emergency_window_exceeded` is derived, never
   stored, and is Gate 1 reviewer judgment input; the requirement is
   app-layer). The `status` CHECK admits only `intake_received`, the sole value
-  locked at the shell level. **Intake form fields, tokenized intake link,
-  gate-level state columns, and a claimant FK/snapshot are Tier 3 and
-  deliberately absent** — Claim Intake is a separate section.
+  locked at the shell level, and **still does after 027** — the Six Gates value
+  set is the Tier 3 claim lifecycle section, which is not drafted.
+  **Intake form fields and the tokenized intake link are no longer absent:
+  migration 027 built them** (see below). Of the shell's four deliberate
+  omissions, gate-level state columns remain absent on purpose — Decision 12's
+  `claim_submission` gate is an *interstitial* on 027's `intake_token`, with the
+  gate's own rows living in 023 — and the "claimant FK/snapshot" is discharged
+  by 027's `submitter_contact_id` + `submitter_name` / `submitter_email`
+  snapshot pair.
+- **`claims` intake data model** (027) — the Tier 3 section 016 deferred to,
+  built as 25 columns on the shell, no new table. The arch ref's **hybrid
+  strategy** is the whole shape: hard columns for what is universal across every
+  claim_type and tenant; `claim_type_data` JSONB for **platform-shaped**
+  variation (varies by claim_type; the field names are fixed by the platform);
+  and custom fields (015/017, `entity_type = 'claim'`) for **tenant-shaped**
+  variation (whether a field exists, what it is called, and its options are all
+  the tenant's). The arch ref names the tell: a platform field has a fixed name,
+  a tenant field is named in the tenant's own operational language. LOTO is the
+  worked example — the categorical `loto_requirement` is a hard column; *who
+  specifically performs LOTO* is a custom field.
+  **Only one of seven `claim_type_data` shapes is settled** (replacement_parts,
+  from Workbook 2). The other six are deliberately unsettled at the
+  architectural layer and **need no migration when they land** — JSONB shape is
+  validated app-layer at write time, the same convention as `clock_events`
+  payload. Do not "helpfully" invent them.
+  **Three flagged Phase 3 implementation details, resolved at build time:**
+  the intake token is a column pair **on the claim row** (`intake_token` /
+  `intake_token_expires_at`), per the Stateless Tokenized Interaction Pattern's
+  "shape to copy, not shared store" rule — three-for-three precedent (022's
+  `customer_token`, 025's `claimant_token`, 026's `recipient_token`), and no
+  UNIQUE, because `invitations.token` (001) is unique only as a *shared store*
+  where the token is the lookup key. `supporting_documents` is **JSONB, not a
+  child table** — the locked semantics store the *categories* a claimant
+  declares they are providing, a checklist with no file, no URL, and no join
+  surface; actual file storage is unaddressed anywhere in v1. The O&M Provider
+  capture is **direct text, not an FK** (`om_provider_company` /
+  `om_contact_name` / `om_contact_phone` / `om_contact_email`, mirroring 022
+  exactly) — the arch ref's open-questions block *proposes* an FK but does not
+  lock it, while 022's committed header states the governing position and names
+  Claim Intake as its parallel.
+  **THE NAMING COLLAPSE — do not re-add.** The arch ref's hard-column sketch
+  lists `priority_emergency`; it was **not built and does not exist**. It is the
+  older name for the same flag 016 already built as `is_emergency` (Decision
+  27.5); this arch-ref section pre-dates Decision 27. One flag, not two. A
+  doc-control note above the frozen sketch records this (Convention 7).
+  **Deliberate omissions:** no `claim_intake_tokens` table, no gate state, no
+  `priority_emergency`, no `claim_attachments` child table, no DB CHECK coupling
+  `emergency_details` to `is_emergency` or `offline_condition_explanation` to
+  `equipment_status` (17.A.6 caps v1 DB enforcement — the same restraint 016
+  applies to `emergency_stabilized_at`), no DB validation of `claim_type_data`
+  against `claim_type`, and **no customer / project / WarrantyID /
+  service-address columns** — Workbook 1's five "auto-populated" fields are all
+  reachable by join, and duplicating them would create sync surfaces where none
+  is needed.
 - **`custom_field_values`** (017) — one filled-in custom field value for one
   entity instance (Decision 3, **Phase 2** decisions log). Closes the Custom
   Field System section. Was blocked until `claims` (016) existed; with all
