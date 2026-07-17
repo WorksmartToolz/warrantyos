@@ -4,9 +4,9 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-16 (Chat 18), HEAD `0c69213`, from verified git history
+**Last built:** 2026-07-16 (Chat 18), HEAD `4a65f45`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (twenty-five tables + one view + three functions built).
+construction is underway (twenty-six tables + one view + three functions built).
 Not from memory or handoff summaries.
 
 ---
@@ -20,7 +20,7 @@ entire operational core — claims, ALA, inspections, work authorizations, servi
 reports, warranty registration, O&M authorization — is **fully designed and
 locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first twenty-five tables (`contacts`, `projects`,
+construction has started**: the first twenty-six tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
 `warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
 `custom_field_definitions`, `claims`, `custom_field_values`,
@@ -28,7 +28,7 @@ construction has started**: the first twenty-five tables (`contacts`, `projects`
 `work_authorization_templates`, `work_authorization_documents`,
 `work_authorization_revisions`, `acknowledgment_gate_templates`,
 `acknowledgment_gate_records`, `tenant_holidays`, `ala_templates`,
-`ala_documents`, `ala_document_revisions`) are
+`ala_documents`, `ala_document_revisions`, `notices_of_defect`) are
 built, migrated, and committed —
 along with the `warranty_coverages_effective` view — with all FK constraints
 between them closed. The era is now building, not designing.
@@ -47,7 +47,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (25 tables + 1 view + 3 functions built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (26 tables + 1 view + 3 functions built)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -63,7 +63,7 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 26** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 27** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
@@ -72,9 +72,10 @@ migrations (005, 006).
   **017_custom_field_values**, **018_inspection_types**,
   **019_inspection_triggers**, **020_work_plans**, **021_inspections**,
   **022_customer_work_authorization**, **023_acknowledgment_gate**,
-  **024_tenant_holidays**, and **025_ala_system** (Phase 3 tables, the FK
-  constraints closing them, the `warranty_coverages_effective` view, and the
-  three business-day calendar functions).
+  **024_tenant_holidays**, **025_ala_system**, and
+  **026_notices_of_defect** (Phase 3 tables, the FK constraints closing them,
+  the `warranty_coverages_effective` view, and the three business-day calendar
+  functions).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
@@ -545,6 +546,61 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   Indistinct outcome, the tokenized Accept/Decline atomic write, the
   dispatcher's overdue flagging, re-issue, and revision capture all remain,
   which is why the Status is `Implemented (schema)`.
+- **`notices_of_defect`** (026) — the Notice of Defect (Decision 14): the
+  warrantor's formal notification to a believed-responsible party, "this defect
+  is yours; respond with acceptance/rejection." **An audit artifact of official
+  notification** — the purpose is that the party believed responsible has been
+  officially notified and that is a matter of record, separate from any
+  downstream execution work. **v1 modeled this as two fields on the Work Plan**
+  (`notice_of_defect_sent`, `notice_of_defect_response`); the Phase 1 audit
+  flagged that as structurally wrong — a Notice of Defect is a document sent to
+  a party, with its own lifecycle, response, and audit trail. Correcting it is
+  the entity's whole point. **The architecture reference has NO Notice of
+  Defect section** — its Work Plan cross-reference says so explicitly ("its own
+  section, drafted in a future session") and points to **Decision 14 in the
+  Phase 3 decisions log, which holds the locked spec**. Built verbatim to that
+  sketch: 20 columns. **No FK to `work_plans` in either direction (14.4)** —
+  the Notice's architectural responsibility ends at response capture; some
+  Notices lead to Work Plans, some never do (the subcontractor remediates
+  independently, or the matter is contractually outside warrantor
+  coordination). "Which Notice led to this Work Plan" is answered by reading
+  claim history, not by traversing an FK. **One-to-many with claims (14.1)** —
+  no UNIQUE on `claim_id`; zero when the defect is the warrantor's own
+  responsibility, many as the responsibility picture evolves. Same shape as
+  020/022; the contrast against 025 and service_reports. **No revisions child
+  table (14.3), deliberately unlike 022 and 025:** acceptance is not closure —
+  a recipient may accept, get to site, and shift position — but such changes
+  become **NEW events** (a new Notice to another party, a claim status
+  transition, an escalation), never revisions to this row. The original
+  response stays frozen testimony. Three-value `response_status`
+  (pending/accepted/rejected) with **no `withdrawn`**: a matter of record is not
+  un-sent. **Dual-FK recipient with an UNCONDITIONAL XOR (14.2)** —
+  deliberately differing from 010's dual-FK assignee CHECK, which gates on
+  status (both null when `pre_activation`); that conditionality is Decision
+  23.7's four-state registration machine, which this entity has no analogue to.
+  A Notice without a recipient is not a thing that exists. The `<>` idiom
+  transfers from 010; the status gate does not — **do not harmonize.** FK +
+  Snapshot on the recipient (three `*_snapshot` columns, frozen at notification
+  and never re-synced — who was actually notified, at that address, on that
+  date). Tokenized recipient response per 14.5; `expected_response_date` NOT
+  NULL per 14.7. **Unlike 025, this migration DID need an `alter table`:**
+  `clock_events` (013) carried neither value, so 026 adds `event_type`
+  `notice_of_defect_response_overdue` and `entity_type` `notice_of_defect`.
+  14.9's "seventh" ordinal is **stale** — Decisions 25/27 landed after 14, so
+  the built enum already held nine; the value is locked, the count was written
+  before the later decisions existed. **14.10 discharged with no migration:**
+  `vendor_contact` already exists in the built `contact_type` enum (005), and
+  `other` covers original installers per 14.10's own "or equivalent".
+  **Deliberate omissions, documented in the migration header:** no
+  `work_plan_id` FK, no revisions table, no UNIQUE on `claim_id`, no
+  `withdrawn` status, **no templates table** (unlike 022/023/025 — 14.8 puts
+  the warrantor's message in `notification_message` per-Notice; the
+  templates-and-documents shape does not transfer), no separate sent-status
+  column (`notified_at` NOT NULL records it), no CHECK coupling response
+  columns to `response_status`, no CHECK coupling snapshots to their FK (that
+  would defeat the point of a snapshot), and no Parts Claim exclusion CHECK
+  (Decision 16.5 is app-layer, same treatment as 020's identical 16.3
+  exclusion).
 
 ---
 
@@ -604,7 +660,7 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 25 tables built — the original "~20" estimate
+   tenant-editable defaults). 26 tables built — the original "~20" estimate
    undercounted, since several sections carry three tables each (contacts,
    projects,
    import_batches, tenant_id_sequences, warranty_registrations, warranty_types,
@@ -613,7 +669,7 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
    work_plans, inspections, work_authorization_templates,
    work_authorization_documents, work_authorization_revisions,
    acknowledgment_gate_templates, acknowledgment_gate_records, tenant_holidays,
-   ala_templates, ala_documents, ala_document_revisions)
+   ala_templates, ala_documents, ala_document_revisions, notices_of_defect)
    plus the warranty_coverages_effective view and the three business-day
    calendar functions.
 3. **Build Phase 3 application layer** — Server Actions, tokenized flows, clock
