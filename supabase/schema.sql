@@ -410,6 +410,34 @@ CREATE TABLE IF NOT EXISTS "public"."claims" (
     "emergency_stabilized_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "claim_type" "text" NOT NULL,
+    "date_of_defect_incident" "date" NOT NULL,
+    "emergency_details" "jsonb",
+    "equipment_status" "text" NOT NULL,
+    "offline_condition_explanation" "jsonb",
+    "loto_requirement" "text" NOT NULL,
+    "required_docs_provided" boolean DEFAULT false NOT NULL,
+    "supporting_documents" "jsonb",
+    "detailed_description" "jsonb" NOT NULL,
+    "submitter_contact_id" "uuid",
+    "submitter_name" "text" NOT NULL,
+    "submitter_email" "text" NOT NULL,
+    "om_provider_company" "text",
+    "om_contact_name" "text",
+    "om_contact_phone" "text",
+    "om_contact_email" "text",
+    "ship_to_street" "text",
+    "ship_to_city" "text",
+    "ship_to_state" "text",
+    "ship_to_zip" "text",
+    "recipient_name" "text",
+    "recipient_phone" "text",
+    "claim_type_data" "jsonb",
+    "intake_token" "text",
+    "intake_token_expires_at" timestamp with time zone,
+    CONSTRAINT "claims_claim_type_check" CHECK (("claim_type" = ANY (ARRAY['billable_service_request'::"text", 'design'::"text", 'equipment'::"text", 'foundation'::"text", 'replacement_parts'::"text", 'tracker'::"text", 'workmanship'::"text"]))),
+    CONSTRAINT "claims_equipment_status_check" CHECK (("equipment_status" = ANY (ARRAY['online'::"text", 'offline'::"text"]))),
+    CONSTRAINT "claims_loto_requirement_check" CHECK (("loto_requirement" = ANY (ARRAY['not_required'::"text", 'required_claimant_responsible'::"text", 'required_warrantor_responsible'::"text"]))),
     CONSTRAINT "claims_status_check" CHECK (("status" = ANY (ARRAY['intake_received'::"text"])))
 );
 
@@ -434,6 +462,50 @@ COMMENT ON COLUMN "public"."claims"."is_emergency" IS 'Decision 27.5. Customer-r
 
 
 COMMENT ON COLUMN "public"."claims"."emergency_stabilized_at" IS 'Decision 27.5. Customer-reported stabilization moment; starts the 24-hour formal-filing window. Self-reported at intake, not independently verified by the platform. Required when is_emergency = true — enforced at the intake form / app layer, NOT as a DB CHECK (Decision 27.6: the 24-hour window is not a submission-blocking validation).';
+
+
+
+COMMENT ON COLUMN "public"."claims"."claim_type" IS 'The seven values come from Workbook 1''s dropdown directly. Extensible: adding a claim_type is a migration that updates this CHECK, the claim_type_data shape for the new type, and its UI affordances.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."emergency_details" IS 'ProseMirror-compatible JSON (Decision 4). The rich-text companion to is_emergency, present only when it is true -- app-layer, NOT a DB CHECK (17.A.6). NOTE: the arch ref names the boolean priority_emergency; that is the older label for is_emergency, which 016 already built from Decision 27.5. One flag, not two. No priority_emergency column exists or should.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."loto_requirement" IS 'Three values covering the three real business shapes. Workbook 1 (supply-only) listed two; the platform-general schema extends to three to cover warrantors who self-perform LOTO. The industry default for system-owner-installed projects is required_claimant_responsible. Detail BEYOND this categorical answer -- who specifically performs LOTO, contact info, authorization details -- is tenant-shaped and lives in custom fields (Decision 3, entity_type = ''claim''), not here. Same subject, different mechanism, because the variation is at a different level.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."supporting_documents" IS 'The multi-select of document CATEGORIES the claimant declares they are providing -- a declaration checklist, not an attachment store. No file, no URL, no per-item metadata, no join surface. The arch ref flags JSONB-vs-child-table here honestly (unlike claim_type_data, where JSONB is locked outright); resolved as JSONB on the locked semantics, because the child-table argument imagines storing documents and this column stores declarations. Actual file storage is unaddressed anywhere in v1 -- if it lands, it is a new entity, not a widening of this column.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."detailed_description" IS 'ProseMirror-compatible JSON (Decision 4) -- one rich-text storage convention platform-wide, not two. Cap defaults: 10,000 effective characters, per-tenant configurable DOWNWARD via tenants.settings.rich_text_max_chars, hard platform ceiling 50,000.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."submitter_contact_id" IS 'FK + Snapshot (Decision 20). Nullable: null when the submitter is a one-off third party not in the contacts directory, in which case the snapshot columns are the only record and agency role cannot be derived. When populated, downstream workflows traverse to the contact''s contact_type to derive whether the claim was filed by the customer, a customer_contact, an O&M Provider (subject to Decision 20.6''s INFORMATIONAL vs BINDING-COMMITMENT carving), or another party. This shape resolves the chat-4-identified traceability gap in Decision 20.4. Soundness across time depends on contact_type immutability (20.4): a role change creates a NEW contact row, never an UPDATE.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."submitter_name" IS 'Snapshot at submission, NOT re-synced from submitter_contact_id, which may drift. Populated regardless of whether the FK is set. Same never-re-sync convention as 026''s recipient_name_snapshot and 021''s.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."om_provider_company" IS 'Direct text capture, NOT an FK -- the four om_* columns mirror 022''s om_provider_company / om_contact_name / om_contact_phone / om_contact_email exactly. The arch ref''s open-questions block PROPOSES an om_provider_contact_id FK and does not lock it; 022''s committed header states the governing position and names Claim Intake as its parallel: "Direct field capture ... is Decision 11''s locked schema, paralleling Claim Intake. Any future move to FK + Snapshot warrants its own decision." No such decision exists. If it lands, it lands for BOTH tables together.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."ship_to_street" IS 'Four scalars following projects.site_address_* for consistency. Whether this is the right level of structure -- or whether the project address pattern itself needs revision for geocoding or international formats -- is a future decision, not raised by any locked source.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."claim_type_data" IS 'Per-claim_type structured fields -- the hybrid strategy''s PLATFORM-shaped variation (contrast custom_field_values, which is TENANT-shaped). JSONB is locked here, NOT flagged as a possible child table like supporting_documents is: variable-schema-by-discriminator is the case JSONB is designed for, the fields do not decompose into uniform child rows, and a polymorphic child table per claim_type would multiply the schema rather than encapsulate the variation. Only the replacement_parts shape is settled (Workbook 2): part_name, row_number, row_controller_asset_id, description_of_issue, customer_comments (rich text). The other six shapes are DELIBERATELY not settled at the architectural layer and need no migration when they are -- shape is validated app-layer at write time, same convention as clock_events.payload.';
+
+
+
+COMMENT ON COLUMN "public"."claims"."intake_token" IS 'Stateless Tokenized Interaction Pattern. The customer receives a tokenized email link to a focused intake form -- no account, no session persistence beyond the link. Stored on this row per "shape to copy, not shared store", parallel to work_authorization_documents.customer_token (022), ala_documents.claimant_token (025), notices_of_defect.recipient_token (026). The arch ref leaves row-column-vs-claim_intake_tokens-table open; three identical precedents close it. No UNIQUE, matching those three -- invitations.token (001) is unique because it is a SHARED STORE where the token is the lookup key; that is the shape this pattern explicitly does not copy. When a tenant has configured an Acknowledgment Gate for gate_purpose = ''claim_submission'' (Decision 12), that gate is an INTERSTITIAL on THIS token -- there is no second token and no gate state on this table.';
 
 
 
@@ -1419,6 +1491,14 @@ CREATE INDEX "ala_templates_tenant_id_idx" ON "public"."ala_templates" USING "bt
 
 
 
+CREATE INDEX "claims_intake_token_idx" ON "public"."claims" USING "btree" ("intake_token") WHERE ("intake_token" IS NOT NULL);
+
+
+
+CREATE INDEX "claims_submitter_contact_id_idx" ON "public"."claims" USING "btree" ("submitter_contact_id") WHERE ("submitter_contact_id" IS NOT NULL);
+
+
+
 CREATE INDEX "claims_tenant_id_idx" ON "public"."claims" USING "btree" ("tenant_id");
 
 
@@ -1642,6 +1722,11 @@ ALTER TABLE ONLY "public"."ala_documents"
 
 ALTER TABLE ONLY "public"."ala_templates"
     ADD CONSTRAINT "ala_templates_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."claims"
+    ADD CONSTRAINT "claims_submitter_contact_id_fkey" FOREIGN KEY ("submitter_contact_id") REFERENCES "public"."contacts"("id") ON DELETE RESTRICT;
 
 
 

@@ -3472,12 +3472,18 @@ Warranty Registration sections:
 
 ## Claim Intake Data Model
 
-**Status: Designed at the architectural level.** The hybrid hard-columns-plus-
-JSONB strategy is locked here; the hard column set and the Replacement Parts
+**Status: Implemented (schema).** Built by migration 027 (claim_intake) as 25
+columns added to the claims shell (016) -- no new table. The hybrid hard-columns-
+plus-JSONB strategy is locked here; the hard column set and the Replacement Parts
 JSONB shape are settled; the JSONB shapes for the other six claim_types are
 deferred to downstream operational drafting when each type's workbook or SOP
-surfaces. Several specific architectural questions are flagged in the
-Outstanding architectural questions subsection below.
+surfaces, and need no migration when they land (shape is validated app-layer).
+The three architectural questions this section flagged as Phase 3 implementation
+details were resolved at build time and are recorded in 027's header: the intake
+token is a column pair on the claim row (three-for-three precedent -- 022, 025,
+026); supporting_documents is JSONB (the locked semantics store declared
+CATEGORIES, not documents); and the O&M Provider capture is direct text, not an
+FK, per 022's committed position naming this section as its parallel.
 
 This section is the operational data model on top of the Claim shell drafted
 in Tier 2. The shell established the entity, its FK to warranty_registrations,
@@ -3535,6 +3541,17 @@ operational language.
 
 These are the universal fields. Every claim has them regardless of claim_type
 or tenant.
+
+*[Doc-control note, added by Chat 19 (2026-07-17) at migration 027. The sketch
+below is frozen design-era testimony per Convention 7 and is not edited in
+place. One correction applies when reading it: `priority_emergency` was NOT
+built and does not exist. It is the older name for the same true/false emergency
+flag that migration 016 had already built as `is_emergency`, from Decision 27.5
+-- this section pre-dates Decision 27, which is the newer locked source. One
+flag, not two; a second would be a sync surface that could disagree with the
+first. Everything the sketch says about `priority_emergency` (including
+`emergency_details` being present only when it is true) is true of
+`is_emergency`. Do not add a `priority_emergency` column.]*
 
     claims (hard columns added to the Tier 2 shell)
       -- shell columns from Tier 2 (id, tenant_id,
