@@ -12,7 +12,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { MemberActions, InvitationActions } from '@/components/ui/team-member-actions'
-import type { UserRole } from '@/types/database'
+import type { UserRole, UserStatus } from '@/types/database'
 
 function roleBadgeClass(role: UserRole) {
   switch (role) {
@@ -128,8 +128,8 @@ export default async function TeamPage() {
                   </TableCell>
                   <TableCell className="text-neutral-500">{member.email}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={roleBadgeClass(member.role)}>
-                      {roleLabel(member.role)}
+                    <Badge variant="outline" className={roleBadgeClass(member.role as UserRole)}>
+                      {roleLabel(member.role as UserRole)}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -153,8 +153,8 @@ export default async function TeamPage() {
                       <MemberActions
                         memberId={member.id}
                         memberName={member.full_name ?? member.email}
-                        memberRole={member.role}
-                        memberStatus={member.status}
+                        memberRole={member.role as UserRole}
+                        memberStatus={member.status as UserStatus}
                         isCurrentUser={member.id === user.id}
                         isLastAdmin={isLastAdmin && member.role === 'team_admin'}
                         adminCount={adminCount}
@@ -190,8 +190,8 @@ export default async function TeamPage() {
                     <TableCell className="text-neutral-500">{invite.full_name ?? '—'}</TableCell>
                     <TableCell className="text-neutral-500">{invite.email}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={roleBadgeClass(invite.role)}>
-                        {roleLabel(invite.role)}
+                      <Badge variant="outline" className={roleBadgeClass(invite.role as UserRole)}>
+                        {roleLabel(invite.role as UserRole)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-neutral-400 text-sm">

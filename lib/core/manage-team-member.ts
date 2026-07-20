@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import type { UserRole } from '@/types/database'
+import type { UserRole, UserStatus } from '@/types/database'
 
 export type ManageResult = { success: true } | { success: false; error: string }
 
@@ -48,9 +48,9 @@ async function fetchTargetUser(
   if (data.tenant_id !== callerTenantId) return { error: 'Cross-tenant operation not allowed' }
 
   return {
-    role: data.role,
+    role: data.role as UserRole,
     tenantId: data.tenant_id,
-    status: data.status,
+    status: data.status as UserStatus,
     removedAt: data.removed_at,
   }
 }
