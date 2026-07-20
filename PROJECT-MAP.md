@@ -4,11 +4,13 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last built:** 2026-07-17 (Chat 19), HEAD `965ef68`, from verified git history
+**Last built:** 2026-07-20 (Chat 20), HEAD `ca3485c`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
-construction is underway (twenty-six tables + one view + three functions built).
-The table count did not change at 027: it added 25 columns to the `claims`
-shell rather than creating a table.
+construction is COMPLETE for every table-bearing section (twenty-nine tables +
+one view + three functions built). Chat 20 built the last two: 028
+(`service_reports`, one table) and 029 (`om_authorization_documents` +
+`om_authorization_templates`, two tables). The table count did not change at
+027: it added 25 columns to the `claims` shell rather than creating a table.
 Not from memory or handoff summaries.
 
 ---
@@ -49,7 +51,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (26 tables + 1 view + 3 functions built)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (29 tables + 1 view + 3 functions built — all table-bearing sections complete)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -75,7 +77,9 @@ migrations (005, 006).
   **019_inspection_triggers**, **020_work_plans**, **021_inspections**,
   **022_customer_work_authorization**, **023_acknowledgment_gate**,
   **024_tenant_holidays**, **025_ala_system**,
-  **026_notices_of_defect**, and **027_claim_intake** (Phase 3 tables, the FK
+  **026_notices_of_defect**, **027_claim_intake**,
+  **028_service_report_submission**, and **029_customer_om_authorization**
+  (Phase 3 tables, the FK
   constraints closing them,
   the `warranty_coverages_effective` view, and the three business-day calendar
   functions).
@@ -658,16 +662,76 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
 
 ---
 
+- **`service_reports`** (028) — the Warranty Service Report (Decision 21 +
+  the arch ref's "Service Report Submission" section): the structured record
+  of completed repair work, the bridge between Work Plan execution and claim
+  closure. **One report per claim (claim_id UNIQUE)** — joins `ala_documents`
+  (025) as UNIQUE-per-claim, the deliberate contrast against 020/022/026.
+  **Submitter dual-FK with a CONDITIONAL XOR gated on `submitted_at`** — both
+  null in pre-submission draft, exactly one non-null when submitted. This is
+  010's conditional shape, **NOT 026's unconditional one** — a service report
+  has a draft state, a Notice of Defect does not. 026's header says DO NOT
+  HARMONIZE about exactly this, and it cuts both ways. **`submission_token`**
+  pair (the subcontractor's tokenized link) resolved by the Stateless
+  Tokenized Interaction Pattern's "shape to copy, not shared store" law — the
+  arch-ref schema block lists only the customer token, the submitter link was
+  prose-flagged, and pattern law (not a new decision) puts a column pair on
+  the row, mirroring 026/025/022. Distinct from this table's own
+  `customer_review_token`. **Seven universal SOP content items** as uniform
+  hard-columns + JSONB (the opposite of `claim_type_data`'s per-discriminator
+  variation). **Customer review = two-value `customer_decision`
+  (accepted | disputed) + `accepted_by_acquiescence` boolean** — silence-
+  acceptance is accepted-with-provenance, not a third enum value, so
+  downstream surfaces handle one state, not two. **No `clock_events` alter:**
+  026 already landed `service_report_response_due` + `service_report`.
+  Decision 21's window config is provisioning-layer only
+  (`tenants.settings.service_report_response_days` + the
+  `service_report_acquiesce_window` feature flag) — **zero columns on this
+  table**, and **no window snapshot column** (21.7: derivable from `fires_at`
+  minus `issued_at`). **Deliberate omissions:** no `work_plan_id` FK
+  (one-to-one through the claim), no subcontractor company columns (reachable
+  via the contact FK), no closure-notice fields, no reviewer-authority
+  columns (Server-Action role check).
+- **`om_authorization_documents` + `om_authorization_templates`** (029) — the
+  Customer-O&M Authorization (Decision 28): the customer's signed
+  authorization for an O&M Provider to act as their agent on ONE specific
+  binding-commitment event (an ALA acceptance, a Work Authorization approval,
+  or a Service Report review). **PER-EVENT, not standing** — this is a
+  substantive scope departure that **supersedes Decision 20.8's** standing
+  per-customer model; sign-once-per-event, closing when the event closes, no
+  persistence across events even for the same customer and O&M relationship
+  on the same day. **Polymorphic `event_type` + `event_reference_id`** over
+  `ala_documents` / `work_authorization_documents` / `service_reports`, with
+  **NO database FK on `event_reference_id`** — 022's exact app-layer shape,
+  precedent `clock_events.entity_id` (013). This is the
+  executes-clean-≠-correct property stated plainly: the migration applies
+  even though the reference points across tables with no DB enforcement;
+  integrity is a Server-Action concern. **Four-value status:** unsigned |
+  signed | closed | stale — **no `voided`, no `superseded`** (28.5 eliminates
+  both: a provider switch reroutes an unsigned row or leaves a signed one
+  untouched; reopening always creates a new row under 28.3). **One-to-many
+  with claims, no UNIQUE** — and no UNIQUE on `(event_type,
+  event_reference_id)` either, because 28.3 requires a reopened event to
+  create a brand-new row for the same reference; "one per event" is an
+  app-layer invariant (one non-terminal row), not a DB constraint.
+  **`linked_om_provider_id` captured at row creation, not derived live**
+  (28.4) — a signed row is permanent proof of who was authorized, and across
+  every event these fields collectively ARE the audit trail (28.10: no
+  dedicated change-log table). **Seventh canonical token use.** The template
+  carries **`created_at` only, no `updated_at`** — the locked sketch's column
+  set, built verbatim (an applying table does not vary it). **No arch-ref
+  section** (Chat 18's Notice-of-Defect precedent): the decisions log holds
+  the spec, the migration header the rationale, this map the gap record.
+
 ## DESIGNED, NOT BUILT — locked architecture, remaining sections
 
 All 28 decisions (11–28) are locked; the Cat 3 backlog is **fully resolved**.
 The following architecture sections are marked **Designed** — prose exists, code
-does not (contacts, projects, ID Generation, Warranty Registration, and Warranty
-Type Coverages have now moved out of this list):
+does not (contacts, projects, ID Generation, Warranty Registration, Warranty
+Type Coverages, Claim Intake Data Model, Service Report Submission, and
+Customer-O&M Authorization have now moved out of this list — the last three
+built as 027, 028, and 029 respectively):
 
-- Claim Intake Data Model
-- Service Report Submission (Decision 21)
-- Customer-O&M Authorization (Decision 28)
 - Tenant-Editable Defaults Pattern (Decision 17) — PARTIAL: the canonical lookup
   shape is built twice (`inspection_types` 018, `inspection_triggers` 019), and
   step 4 is now built — the operational table `inspections` (021) carries both
@@ -714,7 +778,7 @@ the hosted database; all Decision 22.8 transition criteria are satisfied.
 1. ~~Phase 4 baseline~~ — **DONE.**
 2. **Build Phase 3 schema (IN PROGRESS)** — translate the remaining designed
    sections into migrations, following the locked patterns (RLS, FK+snapshot,
-   tenant-editable defaults). 26 tables built — the original "~20" estimate
+   tenant-editable defaults). 29 tables built — the original "~20" estimate
    undercounted, since several sections carry three tables each (contacts,
    projects,
    import_batches, tenant_id_sequences, warranty_registrations, warranty_types,
