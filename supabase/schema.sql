@@ -864,6 +864,72 @@ COMMENT ON COLUMN "public"."notices_of_defect"."expected_response_date" IS 'NOT 
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."om_authorization_documents" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "claim_id" "uuid" NOT NULL,
+    "customer_id" "uuid" NOT NULL,
+    "linked_om_provider_id" "uuid" NOT NULL,
+    "event_type" "text" NOT NULL,
+    "event_reference_id" "uuid" NOT NULL,
+    "template_id" "uuid" NOT NULL,
+    "content_snapshot" "jsonb" NOT NULL,
+    "status" "text" DEFAULT 'unsigned'::"text" NOT NULL,
+    "signer_name_typed" "text",
+    "signed_at" timestamp with time zone,
+    "customer_token" "text",
+    "customer_token_expires_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "om_authorization_documents_event_type_check" CHECK (("event_type" = ANY (ARRAY['ala'::"text", 'work_authorization'::"text", 'service_report'::"text"]))),
+    CONSTRAINT "om_authorization_documents_status_check" CHECK (("status" = ANY (ARRAY['unsigned'::"text", 'signed'::"text", 'closed'::"text", 'stale'::"text"])))
+);
+
+
+ALTER TABLE "public"."om_authorization_documents" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."om_authorization_documents" IS 'The customer''s signed authorization for an O&M Provider to act as their agent on ONE specific binding-commitment event -- an ALA acceptance, a Work Authorization approval, or a Service Report review (Decision 28). PER-EVENT, not standing: sign-once-per-event, closing when the event closes; it does not persist across subsequent events even for the same customer and O&M relationship on the same day. This supersedes Decision 20.8''s standing per-customer model. One-to-many with claims (28.2): event_type + event_reference_id identify one parent row, and reopened events create new rows (28.3) rather than resetting prior ones. NO database FK on event_reference_id: it is polymorphic across three parent tables, resolved app-layer -- so this migration applies cleanly regardless of whether a referenced row exists, which proves execution, not correctness.';
+
+
+
+COMMENT ON COLUMN "public"."om_authorization_documents"."linked_om_provider_id" IS 'The O&M Provider authorized to act on this event, captured at row creation and never derived live (Decision 28.4). This single field carries the entire mid-claim-handoff and audit-defensibility burden: a signed row is permanent proof of who was authorized for this specific event (satisfying 20.7c with no separate snapshot mechanism), and across every event a customer ever has, these fields collectively ARE the audit trail (28.10) -- no dedicated change-log table. On a mid-claim provider switch (28.6): unsigned rows go stale and a new row is created for the incoming provider; signed rows are never touched.';
+
+
+
+COMMENT ON COLUMN "public"."om_authorization_documents"."event_reference_id" IS 'Polymorphic reference to the authorized event: ala_documents.id when event_type = ''ala'', work_authorization_documents.id when ''work_authorization'', service_reports.id when ''service_report''. NO database FK -- Decision 28.1 reuses Decision 11''s two-column (event_type + event_reference_id) shape exactly as 022 built it; precedent clock_events.entity_id (013). Dispatch and referential integrity are app-layer: the Server Action resolves this against the table named by event_type and must check for signed authorizations before a referenced parent row is deleted.';
+
+
+
+COMMENT ON COLUMN "public"."om_authorization_documents"."status" IS 'Four values, exactly: unsigned | signed | closed | stale (Decision 28.5). unsigned (tokenized link sent, awaiting signature) -> signed (permanent audit record) -> closed (mirrors the parent event''s terminal state; no independent lifecycle). stale is the provider-switch terminal for a row that was still unsigned (token invalidated, new row issued per 28.6), audit-only. There is NO ''voided'' value (a switch reroutes unsigned or leaves signed untouched -- nothing to void) and NO ''superseded'' value (28.3 always creates a new row -- nothing to supersede in place). Both omissions are explicit in 28.5. This is a different four-value set from Decision 20.8''s superseded unsigned/signed/voided/superseded model.';
+
+
+
+COMMENT ON COLUMN "public"."om_authorization_documents"."customer_token" IS 'Seventh canonical use of the Stateless Tokenized Interaction Pattern (Decision 28.9), stored on this row per "shape to copy, not shared store," matching ala_documents.claimant_token (025), work_authorization_documents.customer_token (022), notices_of_defect.recipient_token (026), and service_reports.submission_token (028). The "seventh" ordinal collides with other decisions'' counts -- a numbering artifact from different drafting sessions, not a conflict.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."om_authorization_templates" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "acknowledgment_text" "jsonb" NOT NULL,
+    "is_default" boolean DEFAULT false NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."om_authorization_templates" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."om_authorization_templates" IS 'Tenant-defined reusable configuration for Customer-O&M Authorization (Decision 28). acknowledgment_text captures Decision 20.7a-d''s four commitments (agent authorization; no-notification, binding-on-customer, and ultimate-responsibility acknowledgments). Built verbatim to the locked sketch: created_at only, no updated_at.';
+
+
+
+COMMENT ON COLUMN "public"."om_authorization_templates"."is_default" IS 'At most one is_default = true per tenant is the architectural intent. Enforcement is app-layer per Decision 17.A.6''s cap on v1 DB enforcement, parallel to the is_default flags on work_authorization_templates (022), ala_templates (025), and the Acknowledgment Gate (023). No partial-UNIQUE index.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."projects" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -1442,6 +1508,16 @@ ALTER TABLE ONLY "public"."notices_of_defect"
 
 
 
+ALTER TABLE ONLY "public"."om_authorization_documents"
+    ADD CONSTRAINT "om_authorization_documents_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."om_authorization_templates"
+    ADD CONSTRAINT "om_authorization_templates_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."projects"
     ADD CONSTRAINT "projects_pkey" PRIMARY KEY ("id");
 
@@ -1676,6 +1752,34 @@ CREATE INDEX "notices_of_defect_recipient_user_id_idx" ON "public"."notices_of_d
 
 
 CREATE INDEX "notices_of_defect_tenant_id_idx" ON "public"."notices_of_defect" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "om_authorization_documents_claim_id_idx" ON "public"."om_authorization_documents" USING "btree" ("claim_id");
+
+
+
+CREATE INDEX "om_authorization_documents_customer_id_idx" ON "public"."om_authorization_documents" USING "btree" ("customer_id");
+
+
+
+CREATE INDEX "om_authorization_documents_event_reference_idx" ON "public"."om_authorization_documents" USING "btree" ("event_type", "event_reference_id");
+
+
+
+CREATE INDEX "om_authorization_documents_linked_om_provider_id_idx" ON "public"."om_authorization_documents" USING "btree" ("linked_om_provider_id");
+
+
+
+CREATE INDEX "om_authorization_documents_template_id_idx" ON "public"."om_authorization_documents" USING "btree" ("template_id");
+
+
+
+CREATE INDEX "om_authorization_documents_tenant_id_idx" ON "public"."om_authorization_documents" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "om_authorization_templates_tenant_id_idx" ON "public"."om_authorization_templates" USING "btree" ("tenant_id");
 
 
 
@@ -1963,6 +2067,36 @@ ALTER TABLE ONLY "public"."notices_of_defect"
 
 
 
+ALTER TABLE ONLY "public"."om_authorization_documents"
+    ADD CONSTRAINT "om_authorization_documents_claim_id_fkey" FOREIGN KEY ("claim_id") REFERENCES "public"."claims"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."om_authorization_documents"
+    ADD CONSTRAINT "om_authorization_documents_customer_id_fkey" FOREIGN KEY ("customer_id") REFERENCES "public"."contacts"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."om_authorization_documents"
+    ADD CONSTRAINT "om_authorization_documents_linked_om_provider_id_fkey" FOREIGN KEY ("linked_om_provider_id") REFERENCES "public"."contacts"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."om_authorization_documents"
+    ADD CONSTRAINT "om_authorization_documents_template_id_fkey" FOREIGN KEY ("template_id") REFERENCES "public"."om_authorization_templates"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."om_authorization_documents"
+    ADD CONSTRAINT "om_authorization_documents_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
+ALTER TABLE ONLY "public"."om_authorization_templates"
+    ADD CONSTRAINT "om_authorization_templates_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
 ALTER TABLE ONLY "public"."projects"
     ADD CONSTRAINT "projects_customer_id_fkey" FOREIGN KEY ("customer_id") REFERENCES "public"."contacts"("id");
 
@@ -2239,6 +2373,20 @@ ALTER TABLE "public"."notices_of_defect" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "notices_of_defect: tenant read" ON "public"."notices_of_defect" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."om_authorization_documents" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "om_authorization_documents: tenant read" ON "public"."om_authorization_documents" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."om_authorization_templates" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "om_authorization_templates: tenant read" ON "public"."om_authorization_templates" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -2627,6 +2775,18 @@ GRANT ALL ON TABLE "public"."invitations" TO "service_role";
 GRANT ALL ON TABLE "public"."notices_of_defect" TO "anon";
 GRANT ALL ON TABLE "public"."notices_of_defect" TO "authenticated";
 GRANT ALL ON TABLE "public"."notices_of_defect" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."om_authorization_documents" TO "anon";
+GRANT ALL ON TABLE "public"."om_authorization_documents" TO "authenticated";
+GRANT ALL ON TABLE "public"."om_authorization_documents" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."om_authorization_templates" TO "anon";
+GRANT ALL ON TABLE "public"."om_authorization_templates" TO "authenticated";
+GRANT ALL ON TABLE "public"."om_authorization_templates" TO "service_role";
 
 
 
