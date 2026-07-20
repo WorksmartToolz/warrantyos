@@ -5301,3 +5301,137 @@ not just resolving this one case.
 Not yet drafted. Captured here as future scope for the Decision
 session that takes up reserve forecasting. Priority ordering:
 after the 11 Cat 3 backlog items and Decision 17 resolve.
+
+---
+
+## Decision 29: TypeScript Type Generation and Enum Type-Safety
+
+**Decided in Chat 21 (2026-07-20), as the first app-layer task of Phase 3.**
+
+The first attempt at app-layer work (the Decision 17 step-5 validation
+helper) surfaced that `types/database.ts` was hand-maintained and stale:
+it typed only the 3 original auth/team tables and predated the entire
+Phase 3 schema (migrations 013-029, ~24 tables). All app-layer code that
+references Phase 3 tables was blocked on it. This decision resolves how
+TypeScript types are produced and maintained, and how enum-like columns
+are kept type-safe. It is the types-layer counterpart to Decision 10
+(Schema Source of Truth), which governs `schema.sql`.
+
+### 29.1: Types are generated from the schema, never hand-maintained.
+
+`types/database.ts` is a generated artifact produced from the local
+database schema by `scripts/generate-types.mjs` (which wraps
+`supabase gen types typescript --local`). Migrations remain the canonical
+source of truth (Decision 10); the types are derived from the schema the
+migrations build, exactly as `schema.sql` is.
+
+Rationale parallels Decision 10's Option C-over-D reasoning: hand-sync
+discipline that was tolerable at 3 tables cannot be assumed to scale, and
+in fact had already drifted to 24 tables of missing types by the time this
+was discovered. The file's own header had always declared generation as
+the intended approach ("Regenerate with: npx supabase gen types...");
+this decision operationalizes that intent rather than inventing a new one.
+
+### 29.2: Single-file layout; hand-authored alias tail preserved via a marker.
+
+`types/database.ts` remains a single file containing two parts:
+
+- the **generated `Database` type** (overwritten on every run), and
+- a **hand-authored alias tail** below a marker line (preserved verbatim):
+
+      // ─── HAND-AUTHORED CONVENIENCE ALIASES (preserved across regeneration) ───
+
+The generation script splits on the marker, regenerates everything above
+it, and re-appends everything from the marker down. If the marker is
+absent the script aborts rather than discard the aliases. This keeps the
+established `@/types/database` import path and the existing convenience
+aliases (`Tenant`, `User`, `Invitation`, and derived types) exactly where
+consumers already reference them — no import churn was required.
+
+The single-file layout (rather than splitting generated and hand-authored
+content into separate files) was chosen deliberately: it matches the
+pre-existing structure the Phase 1 audit already referenced, and it
+introduces no new file or import surface. The marker is the minimal
+mechanism required to make "preserve the tail" deterministic across
+regeneration.
+
+### 29.3: Explicit union types for CHECK-constrained enum columns.
+
+The Supabase type generator emits `text` columns as `string`, including
+`text` columns carrying a `CHECK (col IN (...))` constraint — it does not
+read CHECK constraints to synthesize literal-union types. Only native
+PostgreSQL `ENUM` types generate as unions, and this schema uses
+`text + CHECK` throughout (a deliberate choice preserved from the locked
+platform-locked-CHECK-enum decisions), not native enums.
+
+Consequently, the generated Row types type every status/role/enum-like
+column as `string`, losing the compile-time precision the old
+hand-written types had encoded by hand. Where a CHECK-constrained column
+needs compile-time precision, the alias tail defines an **explicit union
+sourced from the column's CHECK definition** — for example:
+
+      export type UserRole = 'team_admin' | 'reviewer' | 'viewer'
+      export type UserStatus = 'active' | 'suspended'
+      export type TenantStatus = 'active' | 'suspended' | 'terminated'
+
+These are authored as explicit unions (not derived as `User['role']`,
+which now resolves to `string`). Unions are added **per consumer need**,
+not preemptively for all enum-like columns — the same conservative
+"promote when demonstrated" discipline Decision 17's role-based tree
+applies to platform-locked-vs-tenant-editable.
+
+The union values are locked schema (the CHECK definitions); when a union
+is added or changed, its members are sourced from the column's CHECK on
+disk, never transcribed from memory.
+
+### 29.4: CHECK-constrained reads are narrowed by assertion at the call site.
+
+A value read from a CHECK-constrained column arrives typed as `string`
+(per 29.3). Where it flows into a position expecting the explicit union,
+it is narrowed with a type assertion at the consumption site — for
+example `data.role as UserRole`. The assertion is **sound** because the
+database CHECK constraint guarantees the stored value is a member of the
+union; the type system simply cannot see the CHECK. No runtime re-
+validation is added, consistent with the project's standing preference
+against belt-and-suspenders verification of already-constrained values.
+
+(A boundary-narrowing approach — narrowing once where a query result is
+mapped rather than at each use — was explored and set aside for this
+first application on ergonomic grounds specific to the JSX-map context;
+per-site assertion is the established convention as of this decision. A
+future refactor may revisit boundary narrowing if the assertion sites
+proliferate.)
+
+### Rationale summary
+
+- **Generated over hand-maintained** (29.1): extends Decision 10's
+  Structural Integrity reasoning to the types layer; the drift Decision 10
+  predicted for `schema.sql` had already occurred for the types.
+- **Single file + marker** (29.2): preserves the existing import surface
+  and structure with the minimal mechanism.
+- **Explicit unions + assertion** (29.3, 29.4): recovers the enum type-
+  safety the generator cannot provide, sourced from locked CHECK values,
+  without redundant runtime validation.
+
+### Cross-section dependencies
+
+- **Decision 10 (Schema Source of Truth):** this is its types-layer
+  counterpart. Both establish "migrations canonical, artifact generated."
+  The arch-ref Schema Source-of-Truth section describes `schema.sql`
+  generation; types generation follows the same principle.
+- **Decision 17 step-5 validation helper (and all future app-layer
+  work):** was blocked on current types; this decision unblocks it. The
+  helper and every future Server Action reading Phase 3 tables now have
+  types to compile against.
+- **`scripts/README.md`:** documents the generation mechanics and the
+  enum type-safety convention.
+
+### Implementation status
+
+Landed in commit `ae8f586` (Chat 21): `scripts/generate-types.mjs`,
+regenerated `types/database.ts` (29 tables), explicit unions for
+`UserRole`/`UserStatus`/`TenantStatus`, per-site assertions at the seven
+call sites the regeneration surfaced, and the README documentation. The
+Decision 17 step-5 validation helper itself remains unbuilt — it was the
+task that surfaced this blocker; it resumes next as the first genuinely
+unblocked app-layer build.
