@@ -736,9 +736,10 @@ built as 027, 028, and 029 respectively):
   shape is built twice (`inspection_types` 018, `inspection_triggers` 019), and
   step 4 is now built — the operational table `inspections` (021) carries both
   FK + value snapshot column pairs. Step 5 of the pattern's own six-step
-  convention remains: the canonical validation helper, which is application-
-  layer and does not yet exist. The Status moves to `Implemented (schema)` only
-  when step 5 lands. `Inspections Foundation` has left this list entirely —
+  convention is now built — the canonical validation helper,
+  `validateTenantEditableDefaultsReference` (`lib/core/tenant-editable-defaults.ts`),
+  landed in Chat 22. The pattern stays PARTIAL until its consuming Server
+  Actions are built. `Inspections Foundation` has left this list entirely —
   built as 021. `Acknowledgment Gate Pattern` has also left this list entirely —
   built as 023.
 - Stateless Tokenized Interaction Pattern (applied, not yet coded)
