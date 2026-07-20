@@ -4849,7 +4849,7 @@ Parallel to the deliberate-omissions lists elsewhere:
 
 ## Service Report Submission
 
-**Status: Designed at the architectural level.** This section is sourced
+**Status: Implemented (schema).** Built by migration 028 (service_report_submission). This section is sourced
 primarily from SOP 5 (Submitting a Warranty Service Report), with
 cross-references to SOP 1 (Accepted Warranty Claim Lifecycle) for the
 tenant-configurable customer review window (three-day default per

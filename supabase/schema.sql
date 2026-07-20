@@ -892,6 +892,72 @@ CREATE TABLE IF NOT EXISTS "public"."projects" (
 ALTER TABLE "public"."projects" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."service_reports" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "tenant_id" "uuid" NOT NULL,
+    "claim_id" "uuid" NOT NULL,
+    "submitted_by_contact_id" "uuid",
+    "submitted_by_user_id" "uuid",
+    "submitted_by_name_snapshot" "text",
+    "submitted_by_email_snapshot" "text",
+    "submitted_by_phone_snapshot" "text",
+    "submitted_at" timestamp with time zone,
+    "submission_token" "text",
+    "submission_token_expires_at" timestamp with time zone,
+    "corrective_actions" "jsonb" NOT NULL,
+    "repair_started_at" timestamp with time zone NOT NULL,
+    "repair_completed_at" timestamp with time zone NOT NULL,
+    "personnel" "jsonb" NOT NULL,
+    "parts_used" "jsonb",
+    "photos" "jsonb",
+    "challenges_encountered" "jsonb",
+    "resolution_status" "text" NOT NULL,
+    "further_work_explanation" "jsonb",
+    "reviewer_user_id" "uuid",
+    "reviewer_decision" "text",
+    "reviewed_at" timestamp with time zone,
+    "customer_review_token" "text",
+    "customer_review_token_expires_at" timestamp with time zone,
+    "customer_decision" "text",
+    "accepted_by_acquiescence" boolean,
+    "customer_decided_at" timestamp with time zone,
+    "customer_dispute_details" "jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "service_reports_customer_decision_check" CHECK (("customer_decision" = ANY (ARRAY['accepted'::"text", 'disputed'::"text"]))),
+    CONSTRAINT "service_reports_resolution_status_check" CHECK (("resolution_status" = ANY (ARRAY['fully_resolved'::"text", 'further_work_needed'::"text"]))),
+    CONSTRAINT "service_reports_reviewer_decision_check" CHECK (("reviewer_decision" = ANY (ARRAY['accepted'::"text", 'rejected'::"text"]))),
+    CONSTRAINT "service_reports_submitter_check" CHECK (((("submitted_at" IS NULL) AND ("submitted_by_contact_id" IS NULL) AND ("submitted_by_user_id" IS NULL)) OR (("submitted_at" IS NOT NULL) AND (("submitted_by_contact_id" IS NOT NULL) <> ("submitted_by_user_id" IS NOT NULL)))))
+);
+
+
+ALTER TABLE "public"."service_reports" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."service_reports" IS 'The structured record of completed repair work, prepared by whoever performed the repair and submitted to the warranty professional for review (SOP 5, arch-ref "Service Report Submission"). The bridge between Work Plan execution and claim closure. One service report per claim, structurally (claim_id UNIQUE) -- multiple repair attempts resolve through the dispute-resolution path, not through multiple reports; joins ala_documents (025) as UNIQUE per claim, the deliberate contrast against work_plans (020), work_authorization_documents (022), and notices_of_defect (026). The seven SOP content items are universal across all warrantors -- uniform hard-column + JSONB shape, no custom-field variation. NO work_plan_id FK: the relationship is one-to-one through the claim.';
+
+
+
+COMMENT ON COLUMN "public"."service_reports"."submitted_by_contact_id" IS 'Dual-FK submitter with a CONDITIONAL XOR (arch-ref), gated on submitted_at: both null in pre-submission draft, exactly one non-null when submitted. This is 010''s conditional shape (both null in the pre_activation edge state, XOR otherwise), NOT 026''s unconditional "exactly one" -- a service report has a draft state, a Notice of Defect does not. The `<>` idiom transfers from 010; the discriminator differs (010 gates on a status enum, this gates on submitted_at IS NULL). 026''s header says DO NOT HARMONIZE about exactly this contrast; it cuts both ways. The dual-FK + Snapshot pattern is used here rather than 027''s free-text snapshot because the submitter is a bounded role (subcontractor or self-perform tenant user), never a one-off third party -- so contact-FK reuse earns its audit-defensibility benefit.';
+
+
+
+COMMENT ON COLUMN "public"."service_reports"."submission_token" IS 'The submitter''s tokenized link (Stateless Tokenized Interaction Pattern). The arch-ref schema block lists only the customer''s token; the submitter link storage was prose-flagged as "a column or columns on this table, parallel to customer_review_token." Resolved by the Tier 1 pattern law: the token lives on this row per "shape to copy, not shared store," not in invitations. Column pair mirroring 026''s recipient_token, 025''s claimant_token, 022''s customer_token -- nullable, NO unique. Distinct from customer_review_token on this same table: submission_token gates the subcontractor submitting the report; customer_review_token gates the customer reviewing it after reviewer acceptance.';
+
+
+
+COMMENT ON COLUMN "public"."service_reports"."resolution_status" IS 'fully_resolved | further_work_needed (SOP item 7). further_work_explanation is required app-layer when this is further_work_needed -- not a DB CHECK, per 17.A.6''s cap on v1 DB enforcement, the same restraint as 026.';
+
+
+
+COMMENT ON COLUMN "public"."service_reports"."customer_decision" IS 'Two values, exactly: accepted | disputed. Silence-acceptance (SOP 1''s Assumption of Acquiesce) is NOT a third value -- it is recorded as accepted with accepted_by_acquiescence = true and customer_decided_at = the moment the service_report_response_due clock event processed. Both explicit and silent acceptance close the claim and have the same legal effect; modeling them as one enum value with a provenance boolean keeps downstream surfaces from handling two operationally-identical states, while the boolean preserves the audit distinction.';
+
+
+
+COMMENT ON COLUMN "public"."service_reports"."accepted_by_acquiescence" IS 'True only when the service_report_response_due clock event fires the silence-acceptance path; null in all other cases (including explicit accepts and disputes). The clock event (event_type service_report_response_due, entity_type service_report -- both landed in 026, no alter table here) is inserted by the Server Action that issues the customer link, per Decision 9. Its firing is gated by the service_report_acquiesce_window feature flag (Decision 21.5, app-layer): when disabled, the event is not created and the customer must act explicitly.';
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."tenant_holidays" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "tenant_id" "uuid" NOT NULL,
@@ -1381,6 +1447,16 @@ ALTER TABLE ONLY "public"."projects"
 
 
 
+ALTER TABLE ONLY "public"."service_reports"
+    ADD CONSTRAINT "service_reports_claim_id_key" UNIQUE ("claim_id");
+
+
+
+ALTER TABLE ONLY "public"."service_reports"
+    ADD CONSTRAINT "service_reports_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."tenant_holidays"
     ADD CONSTRAINT "tenant_holidays_pkey" PRIMARY KEY ("id");
 
@@ -1608,6 +1684,18 @@ CREATE INDEX "projects_customer_id_idx" ON "public"."projects" USING "btree" ("c
 
 
 CREATE INDEX "projects_tenant_id_idx" ON "public"."projects" USING "btree" ("tenant_id");
+
+
+
+CREATE INDEX "service_reports_submitted_by_contact_id_idx" ON "public"."service_reports" USING "btree" ("submitted_by_contact_id") WHERE ("submitted_by_contact_id" IS NOT NULL);
+
+
+
+CREATE INDEX "service_reports_submitted_by_user_id_idx" ON "public"."service_reports" USING "btree" ("submitted_by_user_id") WHERE ("submitted_by_user_id" IS NOT NULL);
+
+
+
+CREATE INDEX "service_reports_tenant_id_idx" ON "public"."service_reports" USING "btree" ("tenant_id");
 
 
 
@@ -1890,6 +1978,31 @@ ALTER TABLE ONLY "public"."projects"
 
 
 
+ALTER TABLE ONLY "public"."service_reports"
+    ADD CONSTRAINT "service_reports_claim_id_fkey" FOREIGN KEY ("claim_id") REFERENCES "public"."claims"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."service_reports"
+    ADD CONSTRAINT "service_reports_reviewer_user_id_fkey" FOREIGN KEY ("reviewer_user_id") REFERENCES "public"."users"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."service_reports"
+    ADD CONSTRAINT "service_reports_submitted_by_contact_id_fkey" FOREIGN KEY ("submitted_by_contact_id") REFERENCES "public"."contacts"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."service_reports"
+    ADD CONSTRAINT "service_reports_submitted_by_user_id_fkey" FOREIGN KEY ("submitted_by_user_id") REFERENCES "public"."users"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."service_reports"
+    ADD CONSTRAINT "service_reports_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
+
+
+
 ALTER TABLE ONLY "public"."tenant_holidays"
     ADD CONSTRAINT "tenant_holidays_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id");
 
@@ -2133,6 +2246,13 @@ ALTER TABLE "public"."projects" ENABLE ROW LEVEL SECURITY;
 
 
 CREATE POLICY "projects: members can view their tenant's rows" ON "public"."projects" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
+
+
+
+ALTER TABLE "public"."service_reports" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "service_reports: tenant read" ON "public"."service_reports" FOR SELECT USING (("tenant_id" = "public"."get_user_tenant_id"()));
 
 
 
@@ -2513,6 +2633,12 @@ GRANT ALL ON TABLE "public"."notices_of_defect" TO "service_role";
 GRANT ALL ON TABLE "public"."projects" TO "anon";
 GRANT ALL ON TABLE "public"."projects" TO "authenticated";
 GRANT ALL ON TABLE "public"."projects" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."service_reports" TO "anon";
+GRANT ALL ON TABLE "public"."service_reports" TO "authenticated";
+GRANT ALL ON TABLE "public"."service_reports" TO "service_role";
 
 
 
