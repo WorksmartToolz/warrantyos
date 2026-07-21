@@ -96,23 +96,16 @@ digs before building.
 Without these, a freshly provisioned tenant is missing the seed rows the
 operational tables require, so operational features fail on a new tenant.
 
-- [ ] **A1. Seed `tenant_id_sequences` at provisioning.** Add the two default
-  rows (WarrantyID, ClaimID) in `lib/core/provision-tenant.ts`.
-  *Source: arch-ref ID Generation; 009 built the table + backfill for existing
-  tenants but new-tenant seeding is app-layer.*
-- [ ] **A2. Seed the two `warranty_types` anchor rows** (Standard Warranty,
-  Workmanship Warranty) at provisioning.
-  *Source: arch-ref 2945; Decision 6.*
-- [ ] **A3. Seed the tenant-editable-defaults rows** (4 inspection_types, 8
-  inspection_triggers) at provisioning.
-  *Source: arch-ref 4418; Decision 17.B.*
-- [ ] **A4. Seed `tenant_holidays`** (U.S. federal list, calling
-  `federal_holidays_for_year`) at provisioning.
-  *Source: arch-ref 4275; Decision 25.3; 024 built the function.*
-- [ ] **A5. Confirm feature-flag defaults seed at provisioning** (`epc_workflow`,
-  `supply_only_workflow`, and the Phase-1 flags, all opt-out/enabled). Verify
-  against current `provision-tenant.ts` — may already be partly done.
-  *Source: arch-ref 454-481.*
+- [x] ~~**A1. Seed `tenant_id_sequences` at provisioning.**~~ **Done Chat 24, `ac90fa2`.** Two rows: `warranty_id` (WID-{year}-{seq:06d}) + `claim_id` (CLM-{year}-{seq:07d}), current_value 0. *Source: arch-ref ID Generation; 009.*
+- [x] ~~**A2. Seed the two `warranty_types` anchor rows.**~~ **Done Chat 24, `ac90fa2`.** Standard + Workmanship, is_system. Seeded LAST (see Findings). *Source: arch-ref 2945; Decision 6.*
+- [x] ~~**A3. Seed the tenant-editable-defaults rows** (4 inspection_types, 8 inspection_triggers).~~ **Done Chat 24, `ac90fa2`,** all platform_locked. *Source: Decision 17.B.*
+- [x] ~~**A4. Seed `tenant_holidays`.**~~ **Done Chat 24, `ac90fa2`.** `federal_holidays_for_year` over the locked 2026-2036 horizon (mirrors 024 backfill), 121 rows. *Source: arch-ref 4275; Decision 25.3.*
+- [x] ~~**A5. Seed provisioning defaults.**~~ **Partially done Chat 24, `ac90fa2`.** The 6 `tenants.settings` scalar keys (ala_signature_method, ala_decline_warning_text, ala_decline_recant_window_days, ala_markup_percent, ala_response_overdue_business_days, service_report_response_days) ARE seeded. The 3 feature flags (epc_workflow, supply_only_workflow, service_report_acquiesce_window) are **NOT** — flag storage + is_feature_enabled reader do not exist yet, so they moved to **D2**. *Source: Decisions 7/19/21/25; flags arch-ref 454-481.*
+
+**Findings from the A1-A5 build (Chat 24) — do not rediscover these:**
+1. **`.env.local` points `NEXT_PUBLIC_SUPABASE_URL` at HOSTED PRODUCTION** (`uzjivnmwedfzcgqnnhos`). Running `provision-tenant.mjs` with no override hits PROD. For local verification, prefix: `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_SERVICE_ROLE_KEY=<local secret from supabase status> npx tsx scripts/...`. A Chat 24 test hit prod before this was caught (rollback cleaned it up). Never run provisioning/seed tests without the local override.
+2. **The Decision 6 trigger makes `warranty_types.is_system` rows un-deletable through the app path** — so the provisioning compensating-rollback CANNOT delete them. warranty_types is therefore seeded LAST; any earlier-step failure rolls back cleanly. Any future seed added after warranty_types would re-break rollback. For manual scratch teardown, `set session_replication_role = replica;` bypasses the trigger (superuser only).
+3. **After `supabase db reset`, PostgREST serves a stale schema cache** ("Could not find the table ... in the schema cache" on the NEW tables). Fix: `docker restart supabase_rest_warrantyos` before REST-based verification.
 
 ---
 
@@ -207,7 +200,7 @@ Each needs a scoping pass before build.
 
 ## LAYER D — Feature Flag System (thin but gates C-layer behavior)
 
-- [ ] **D2. Build `is_feature_enabled(tenant, feature)` reader** + storage, if
+- [ ] **D2. Build `is_feature_enabled(tenant, feature)` reader** + storage, AND seed the 3 provisioning feature-flag defaults (epc_workflow, supply_only_workflow, service_report_acquiesce_window) deferred from A5, if
   not already present. Server Actions call it before workflow branches; nothing
   reads flag storage directly. *Source: arch-ref 393-429.*
 
