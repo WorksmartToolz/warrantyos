@@ -5435,3 +5435,104 @@ call sites the regeneration surfaced, and the README documentation. The
 Decision 17 step-5 validation helper itself remains unbuilt — it was the
 task that surfaced this blocker; it resumes next as the first genuinely
 unblocked app-layer build.
+
+---
+
+## Decision 30: Tier 3 Claim Lifecycle — Six Gates Status Enum, Transitions, and Actors (D1 design gap resolved)
+
+**Decided in Chat 25; committed Chat 26** (Chat 25's shell tool dropped before the disk write; repo stayed clean at 9a271b8 until this landed).
+
+### Context
+
+The claim shell (016) locked exactly one status value, `intake_received`, and
+stated in its own header that the richer value set "reflects v1's Six Gates plus
+outcome states and is Tier 3 ... added by a later migration when that section is
+drafted." Across the arch-ref (3358, 3395, 3777, 5062) and Decisions 14/15/27,
+the claim-level status machine is deferred — every mention points forward to a
+"Tier 3 claim lifecycle section" that was never written. This was the one true
+design gap (roadmap D1): locked design did not exist for it.
+
+An exhaustive dig (both decisions logs, full arch-ref, entire repo, git history,
+the built migrations, and SOP 1 read in full) established: (a) the Six Gates are
+a *characterization* of SOP 1's linear flow, not an enumerated list in any
+source; (b) only two gates are named in the locked sources — Gate 1 =
+Administrative Validation (016 header), Gate 3 = Evidence Evaluation (arch-ref
+4356); (c) only Resolved, Closed, and "Indistinct Claim — ALA Required" are
+named outcome states; (d) 016 deliberately deferred the full enum by design, not
+oversight. Naming the remaining gates/outcomes and settling the enum is therefore
+a genuine design act, resolved here the design way against SOP 1.
+
+### Question
+
+What is the closed `claims.status` value set (the Six Gates + outcome states),
+and where do the transitions and authorized actors live?
+
+### Resolution
+
+**30.1: Twelve-value closed status enum on the single `status` column.** No
+gate-level columns (016 deliberate-omission list; arch-ref 3415: the Six Gates
+are a structure over `status`, not columns). Values, in SOP 1 order:
+
+- `intake_received` — entry; the only value 016 locked (kept).
+- `administrative_validation` — **Gate 1.** Initial Claim Review: validity,
+  coverage, responsible-entity ID. Named in 016 header, three-outcome shape.
+- `responsibility_notice` — **Gate 2.** Notice of Defect issued + accept/reject
+  (SOP 1; Decision 14).
+- `evidence_evaluation` — **Gate 3.** Indistinct/ALA + Joint Inspection where
+  causation is unclear. Named at arch-ref 4356.
+- `work_planning_authorization` — **Gate 4.** Work Plan → Work Authorization
+  approved (SOP 1; Decisions 11/15).
+- `execution_service_report` — **Gate 5.** Scheduling → repair execution →
+  Service Report → review → Notice of Resolution. Decisions 15.3/15.4 REQUIRE
+  execution and scheduling to live at claim level, not on work_plans.
+- `customer_review` — **Gate 6.** Three-day customer review window (arch-ref
+  5062; Decision 21).
+
+**30.2: Five outcome/terminal states.**
+
+- `resolved` — reviewer accepts the Service Report (arch-ref 5066). Non-terminal;
+  precedes closure.
+- `closed` — customer accepts/acquiesces, or post-dispute resolution; Notice of
+  Closure sent (arch-ref 5069; SOP 1 Claim Closure step).
+- `denied` — claim rejected at review (SOP 1; workbooks 3/4).
+- `escalated` — a denied claim is appealed (arch-ref 4298 "the existing
+  Escalated/Denied claim pathway"; Denial Escalation Intake + Reviewer Data
+  workbooks).
+- `indistinct_ala_required` — one of v1's Six Final Outcomes (025 comment /
+  arch-ref 3801). A branch/flag at Gate 3, gated by an unsigned ALA (19.7);
+  resolves back into the linear flow once the ALA is signed.
+
+**30.3: Transitions and authorized actors are NOT encoded in the database.**
+Following the exact discipline Decision 15 sets for work_plans: the value set is
+the lock; the transition map and the actor authorized for each transition are
+governed by the claim-progression Server Actions (roadmap C10), not by CHECK or
+trigger. The DB CHECK enforces the closed value set only.
+
+**30.4: is_emergency stays a separate flag.** Per Decision 27.5, emergency is a
+filing-timing carve-out (`is_emergency` boolean), never a status value.
+
+### Design-fresh elements (flagged honestly)
+
+Gate names 2/4/5/6 and the outcomes `denied`/`escalated` are reconstructed from
+SOP 1's flow + the escalation workbooks, not recovered verbatim from a prior
+lock. Gates 1/3 and outcomes resolved/closed/indistinct_ala_required ARE named
+in locked sources. Ratified by Andre in Chat 25.
+
+### Decision implications for already-committed sections
+
+- **Claim shell (016).** Its status-column CHECK and comment are superseded by
+  migration 030. 016's header note anticipated exactly this migration.
+- **Work Plan (Decision 15).** 15.3/15.4's "tracked at claim status level"
+  moments now have concrete homes: `execution_service_report` (execution +
+  scheduling). Work Plan status stays as locked; no change.
+- **Service Report (Decision 21).** Its arch-ref "Claim status interactions
+  (deferred to claim lifecycle)" block is now settled: reviewer acceptance →
+  `resolved`; customer acceptance/acquiescence → `closed`.
+- **C10 (roadmap).** Unblocked. The claim-progression Server Actions build
+  against this enum + the transition map named in 30.3.
+
+### Implementation status
+
+Migration 030 (`030_claim_lifecycle_status.sql`) — CHECK swap on
+`claims_status_check`, extending the one-value shell CHECK to the twelve-value
+set, plus refreshed column comment. Committed Chat 26.
