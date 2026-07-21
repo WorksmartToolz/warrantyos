@@ -76,7 +76,7 @@ digs before building.
 
 ## ⚠️ DESIGN GAP — must be resolved before a full claim can be tested end-to-end
 
-- [ ] **D1. Draft the Tier 3 Claim Lifecycle (Six Gates) design.** This is a
+- [x] ~~**D1. Draft the Tier 3 Claim Lifecycle (Six Gates) design.**~~ **Done Chat 25 (design + ratification), committed Chat 26 (`0b27f70` migration 030, `a7658b3` Decision 30 log).** The twelve-value claim `status` enum is locked — six gate stages + five outcomes; transitions/actors live in C10 Server Actions (Decision 30.3). Original framing preserved below as history. This was a
   DESIGN task, not a build task — it is NOT yet locked. The claim `status` value
   set (Gate 1–Gate 6 + outcome states), the transitions between them, the actor
   authorized for each transition, and each transition's effects are all
