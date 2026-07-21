@@ -4,7 +4,7 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last updated:** 2026-07-21 (Chat 23), HEAD `fe091e2`, from verified git history
+**Last updated:** 2026-07-21 (Chat 26), HEAD `201d666`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
 construction is COMPLETE for every table-bearing section (twenty-nine tables +
 one view + three functions built). Chat 20 built the last two: 028
@@ -188,8 +188,11 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   customer's own self-report — `emergency_window_exceeded` is derived, never
   stored, and is Gate 1 reviewer judgment input; the requirement is
   app-layer). The `status` CHECK admits only `intake_received`, the sole value
-  locked at the shell level, and **still does after 027** — the Six Gates value
-  set is the Tier 3 claim lifecycle section, which is not drafted.
+  locked at the shell level. **UPDATE (Decision 30, migration 030, Chat 25/26):
+  the Six Gates value set is now DRAFTED AND LOCKED** — the `status` CHECK carries
+  twelve values (six gate stages + five outcomes); transitions/actors live in the
+  C10 Server Actions, not the DB. The sentence that follows described the pre-030
+  state and is retained as history.
   **Intake form fields and the tokenized intake link are no longer absent:
   migration 027 built them** (see below). Of the shell's four deliberate
   omissions, gate-level state columns remain absent on purpose — Decision 12's
