@@ -5220,6 +5220,8 @@ Phase 1 features list in the Feature Flag System section.
 
 ### Claim status interactions (deferred to claim lifecycle)
 
+> **SUPERSEDED / RESOLVED by Decision 30 (Chat 25, committed Chat 26, migration 030).** The deferral described in this section is now closed. The claim status enum is locked at twelve values — six gate stages (intake_received, administrative_validation, responsibility_notice, evidence_evaluation, work_planning_authorization, execution_service_report, customer_review) plus outcomes (resolved, closed, denied, escalated, indistinct_ala_required). The "Resolved" and "Closed" states this section anticipated are values `resolved` and `closed` in that set. Transitions + authorized actors live in the C10 claim-progression Server Actions, not the DB (Decision 30.3). The narrative below is preserved as historical design testimony per Convention 7 — read it as the question Decision 30 answered, not as an open item.
+
 The service report flow drives several claim status transitions:
 
 - On reviewer acceptance: claim moves to a "Resolved" state (SOP 5 and
