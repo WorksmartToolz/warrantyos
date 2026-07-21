@@ -76,7 +76,20 @@ export async function provisionTenant(
   // Create the tenant
   const { data: tenant, error: tenantError } = await admin
     .from('tenants')
-    .insert({ name: tenantName.trim(), slug: tenantSlug, max_team_admins: maxTeamAdmins })
+    .insert({
+      name: tenantName.trim(),
+      slug: tenantSlug,
+      max_team_admins: maxTeamAdmins,
+      settings: {
+        ala_signature_method: 'in_platform_widget',
+        ala_decline_warning_text:
+          'We cannot move forward without your acceptance. Your claim is subject to denial.',
+        ala_decline_recant_window_days: 3,
+        ala_markup_percent: 10,
+        ala_response_overdue_business_days: 7,
+        service_report_response_days: 3,
+      },
+    })
     .select('id')
     .single()
 
@@ -108,6 +121,81 @@ export async function provisionTenant(
       error: `Failed to create invitation: ${inviteError.message}`,
     }
   }
+
+  // --------------------------------------------------------------------------
+  // A1-A5 provisioning seeds (roadmap Layer A). A tenant is either fully
+  // seeded or does not exist: any seed failure triggers a compensating
+  // rollback of this tenant's seeded rows, its invitation, and the tenant,
+  // then returns an error. (Option B, app-level compensating rollback --
+  // the Supabase JS client has no multi-statement transaction.)
+  // Feature flags (epc_workflow, supply_only_workflow,
+  // service_report_acquiesce_window) are intentionally NOT seeded here: the
+  // feature-flag storage shape + is_feature_enabled reader do not exist yet
+  // (roadmap D2). D2 seeds its own flag defaults at provisioning.
+  // --------------------------------------------------------------------------
+  const rollbackTenant = async (reason: string): Promise<ProvisionTenantResult> => {
+    await admin.from('tenant_holidays').delete().eq('tenant_id', tenant.id)
+    await admin.from('inspection_triggers').delete().eq('tenant_id', tenant.id)
+    await admin.from('inspection_types').delete().eq('tenant_id', tenant.id)
+    await admin.from('tenant_id_sequences').delete().eq('tenant_id', tenant.id)
+    await admin.from('invitations').delete().eq('tenant_id', tenant.id)
+    await admin.from('tenants').delete().eq('id', tenant.id)
+    return { success: false, error: reason }
+  }
+
+  // A1: tenant_id_sequences (2 rows, gap-free counters; Decision 2)
+  const provisioningYear = new Date().getUTCFullYear()
+  const { error: seqError } = await admin.from('tenant_id_sequences').insert([
+    { tenant_id: tenant.id, id_type: 'warranty_id', format_string: 'WID-{year}-{seq:06d}', current_year: provisioningYear, current_value: 0 },
+    { tenant_id: tenant.id, id_type: 'claim_id',    format_string: 'CLM-{year}-{seq:07d}', current_year: provisioningYear, current_value: 0 },
+  ])
+  if (seqError) return rollbackTenant(`Failed to seed id sequences: ${seqError.message}`)
+
+  // A3: inspection_types (4) + inspection_triggers (8), platform_locked (Decision 17.B)
+  const inspectionTypes = [
+    { value: 'warranty',                 label: 'Warranty' },
+    { value: 'condition_assessment',     label: 'Condition Assessment' },
+    { value: 'remediation_verification', label: 'Remediation Verification' },
+    { value: 'failure_investigation',    label: 'Failure Investigation' },
+  ].map((r, i) => ({ tenant_id: tenant.id, value: r.value, label: r.label, lock_tier: 'platform_locked', sort_order: i }))
+  const { error: itError } = await admin.from('inspection_types').insert(inspectionTypes)
+  if (itError) return rollbackTenant(`Failed to seed inspection types: ${itError.message}`)
+
+  const inspectionTriggers = [
+    { value: 'warranty_claim',                    label: 'Warranty Claim' },
+    { value: 'customer_request',                  label: 'Customer Request' },
+    { value: 'repeat_condition_verification',     label: 'Repeat Condition Verification' },
+    { value: 'post_remediation_verification',     label: 'Post-Remediation Verification' },
+    { value: 'failure_investigation',             label: 'Failure Investigation' },
+    { value: 'preventative_condition_assessment', label: 'Preventative / Condition Assessment' },
+    { value: 'internal_review',                   label: 'Internal Review' },
+    { value: 'third_party',                       label: 'Third Party' },
+  ].map((r, i) => ({ tenant_id: tenant.id, value: r.value, label: r.label, lock_tier: 'platform_locked', sort_order: i }))
+  const { error: trError } = await admin.from('inspection_triggers').insert(inspectionTriggers)
+  if (trError) return rollbackTenant(`Failed to seed inspection triggers: ${trError.message}`)
+
+  // A4: tenant_holidays over the locked 2026-2036 horizon (mirrors 024 backfill)
+  const holidayRows: { tenant_id: string; holiday_date: string; label: string }[] = []
+  for (let y = 2026; y <= 2036; y++) {
+    const { data: hol, error: holFnError } = await admin.rpc('federal_holidays_for_year', { p_year: y })
+    if (holFnError) return rollbackTenant(`Failed to compute holidays for ${y}: ${holFnError.message}`)
+    for (const h of (hol ?? []) as { holiday_date: string; label: string }[]) {
+      holidayRows.push({ tenant_id: tenant.id, holiday_date: h.holiday_date, label: h.label })
+    }
+  }
+  const { error: holError } = await admin.from('tenant_holidays').insert(holidayRows)
+  if (holError) return rollbackTenant(`Failed to seed holidays: ${holError.message}`)
+
+  // A2: warranty_types anchors (2 rows, is_system; Decision 6). Seeded LAST:
+  // the Decision 6 trigger makes is_system rows un-deletable through the app
+  // path, so the compensating rollback above cannot delete them. Seeding these
+  // last means any earlier failure rolls back cleanly (no warranty_types seeded
+  // yet), and a failure here leaves nothing after it to orphan.
+  const { error: wtError } = await admin.from('warranty_types').insert([
+    { tenant_id: tenant.id, name: 'Standard Warranty',    is_system: true },
+    { tenant_id: tenant.id, name: 'Workmanship Warranty', is_system: true },
+  ])
+  if (wtError) return rollbackTenant(`Failed to seed warranty types: ${wtError.message}`)
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
   const invitationUrl = `${appUrl}/signup?token=${token}`
