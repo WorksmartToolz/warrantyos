@@ -156,12 +156,12 @@ entity has scheduled events. **`inspections` (Chat 23) is the reference shape.**
 Each needs a scoping pass before build.
 
 - [x] ~~**C0. Inspection write-path** (create).~~ **Done Chat 23, `2c76cf0`.**
-- [ ] **C1. Tenant-editable-defaults lookup admin CRUD** — create/rename/disable/
+- [x] ~~**C1. Tenant-editable-defaults lookup admin CRUD**~~ — create/rename/disable/
   soft-delete rows in `inspection_types` / `inspection_triggers`, each gated by
   `lock_tier` (platform_locked immutable, platform_seeded limited, tenant_added
   full), plus label→value slugification for tenant_added. Finishes the
   Tenant-Editable Defaults pattern (flips it off PARTIAL). *Most-locked next
-  build. Source: Decision 17.A.4/17.A.5/17.A.7.*
+  build. Source: Decision 17.A.4/17.A.5/17.A.7.* **Done Chat 23, `15a6779`.**
 - [ ] **C2. Inspection edit/status-transition actions** — the `open →
   in_progress → under_review → issued` machine on the built table.
   *Source: 021; arch-ref inspections section.*
