@@ -738,8 +738,7 @@ built as 027, 028, and 029 respectively):
   FK + value snapshot column pairs. Step 5 of the pattern's own six-step
   convention is now built — the canonical validation helper,
   `validateTenantEditableDefaultsReference` (`lib/core/tenant-editable-defaults.ts`),
-  landed in Chat 22. The pattern stays PARTIAL until its consuming Server
-  Actions are built. `Inspections Foundation` has left this list entirely —
+  landed in Chat 22. The pattern's first consuming Server Action is now built — the inspection write-path (`lib/actions/inspections.ts` -> `lib/core/inspections.ts`, 2c76cf0, Chat 23), the reference shape for all future consumers. The pattern stays PARTIAL until the remaining consumers — the lookup-table admin CRUD (create / rename / disable / soft-delete, gated by lock_tier per 17.A.5/17.A.7) — are also built. `Inspections Foundation` has left this list entirely —
   built as 021. `Acknowledgment Gate Pattern` has also left this list entirely —
   built as 023.
 - Stateless Tokenized Interaction Pattern (applied, not yet coded)
