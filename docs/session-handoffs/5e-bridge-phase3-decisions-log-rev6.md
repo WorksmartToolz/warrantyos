@@ -5536,3 +5536,112 @@ in locked sources. Ratified by Andre in Chat 25.
 Migration 030 (`030_claim_lifecycle_status.sql`) — CHECK swap on
 `claims_status_check`, extending the one-value shell CHECK to the twelve-value
 set, plus refreshed column comment. Committed Chat 26.
+
+## Decision 31: Claim-Progression Server Actions (C10) — Transition Map, Actor Authorization, and Escalation-Verdict Tenant Setting
+
+**Decided and committed Chat 27** (2026-07-22). Code: commit `85f7f1b`
+(`lib/core/claim-progression.ts` + `lib/actions/claims.ts`).
+
+### Context
+
+Decision 30 locked the twelve-value `claims.status` enum and explicitly placed
+the transition map and authorized actors in the C10 Server Action layer (30.3),
+not in the DB — the same discipline Decision 15 sets for work_plans. Building C10
+required settling three things Decision 30 named but did not enumerate: (a) the
+concrete transition map (which status may move to which), (b) the actor
+authorized for each transition, and (c) how to authorize the bias-sensitive
+escalation verdict without inventing a new user role.
+
+An exhaustive dig established that (a) and (b) are almost entirely RECOVERABLE
+from locked sources — SOP 1 (Accepted Warranty Claim Lifecycle), the Denied and
+Escalated/Denied SOPs, and the two Denial-Escalation workbooks name the flow and
+the actor at nearly every step. Only (c) was genuinely unsettled, and it resolves
+against the already-locked `tenants.settings` configurable pattern rather than as
+a fresh architecture act.
+
+### Question
+
+What is the claim-status transition map, who is authorized for each transition,
+and how is the escalation verdict authorized given the locked three-role
+vocabulary (`team_admin`/`reviewer`/`viewer`, migration 003) contains no
+executive role?
+
+### Resolution
+
+**31.1: Transition map recovered from the lifecycle SOPs + escalation workbooks.**
+The map is a single declarative structure in `claim-progression.ts`, keyed by
+current status. Transitions not listed are illegal and rejected regardless of
+caller role. The map encodes the SOP 1 linear flow, the three-outcome Gate 1
+(valid → responsibility_notice; indistinct → indistinct_ala_required; fails
+Evaluation Decision → denied), the ALA-gated Gate 3, and the denied/escalated
+branch from the Denied and Escalated SOPs.
+
+**31.2: Actor authorization has three fixed classes plus one configurable class.**
+- `operational` — `reviewer` OR `team_admin`. All ordinary linear-flow
+  transitions. (Viewers hold no write authority — codebase authz idiom.)
+- `escalation_verdict` — role read from tenant settings (see 31.4). The two
+  escalation-verdict transitions (`escalated → closed`, `escalated →
+  work_planning_authorization`).
+- `system` — no human caller; the clock/cron (B-layer) fires it. The two
+  clock-driven transitions (`customer_review → closed` on 3-day silence;
+  `denied → closed` on lapsed dispute window). A human request for a system
+  transition is rejected; the B-layer uses a separate exported entry point
+  (`transitionClaimStatusAsSystem`) not exposed as a Server Action.
+
+**31.3: The indistinct → evidence transition carries an ALA data precondition.**
+`indistinct_ala_required → evidence_evaluation` is permitted only when the
+claim's `ala_documents` row is in state `signed` (`claimant_decision =
+'accepted'` AND `signed_at IS NOT NULL`), per Decision 19.7's blocking gate.
+This is the one transition gated by data on another table, not just by actor.
+`indistinct_ala_required` is the BLOCKED state (claim resting at Gate 3, ALA
+open); `evidence_evaluation` is the CLEARED, investigating state (Joint
+Inspection / causation work) after the ALA is signed. The UI reflects
+"Indistinct — ALA Required" as a real resting point until the signed ALA clears
+it forward.
+
+**31.4: Escalation-verdict authorized role is a per-tenant setting, default
+`team_admin`.** Stored at `tenants.settings.escalation_verdict_authorized_role`.
+Platform default is `team_admin` — the bias-prevention "higher authority" path
+that keeps the warranty process from feeling like a judge-and-jury event. A
+tenant whose process authorizes a warranty-department reviewer to render the
+verdict may set the key to `reviewer`. This is a new instance of the locked
+`tenants.settings` configurable pattern (this log ~1910: read through the Server
+Action layer with a platform-default fallback), and C10 contains the FIRST built
+settings-key reader. Absent/malformed/`viewer` values fall back to the
+higher-authority default, so C10 is correct even before the provisioning layer
+seeds the key.
+
+**31.5: Optimistic concurrency guard on the status write.** The update writes
+`status = to WHERE id = claimId AND status = from` (the validated current value),
+so a concurrent transition cannot be silently clobbered.
+
+### Design-fresh elements (flagged honestly)
+
+Only 31.4 (escalation-verdict as a tenant setting, default `team_admin`) is a
+new operational-policy decision, ratified by Andre in Chat 27 — derived from
+Andre's statement that verdict authority "varies company to company; ideally a
+higher authority renders the verdict to prevent bias," combined with the locked
+`tenants.settings` pattern. The transition map (31.1) and the actor classes
+(31.2) are recovered from the lifecycle SOPs + workbooks. Denial is early-gate
+only per the SOPs; the map structure keeps later denial edges a one-line addition
+if the operational chain later requires them (Andre, Chat 27: "nothing is
+concrete, anything is possible even if it hasn't happened yet").
+
+### Decision implications for already-committed sections
+
+- **Migration 030.** Its column comment already names C10 as the owner of
+  transitions + actors; 031 fills that ownership in. No schema change.
+- **B-layer (roadmap).** Inherits `transitionClaimStatusAsSystem` as the entry
+  point for the two clock-driven transitions; the B-layer verifies the deadline
+  before calling.
+- **D2 / provisioning (roadmap).** Now owns seeding the
+  `escalation_verdict_authorized_role` default alongside the other deferred
+  provisioning defaults. C10 is correct without it (absent → safe default), so
+  this is a completeness task, not a blocker.
+
+### Implementation status
+
+`lib/core/claim-progression.ts` (transition map, authz, ALA precondition,
+settings reader, user + system entry points) and `lib/actions/claims.ts` (thin
+`progressClaim` Server Action). Typechecked (`tsc --noEmit` clean). Committed
+`85f7f1b`, pushed Chat 27.

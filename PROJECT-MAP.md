@@ -4,7 +4,7 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last updated:** 2026-07-21 (Chat 26), HEAD `201d666`, from verified git history
+**Last updated:** 2026-07-22 (Chat 27), HEAD `85f7f1b`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
 construction is COMPLETE for every table-bearing section (twenty-nine tables +
 one view + three functions built). Chat 20 built the last two: 028
@@ -22,7 +22,7 @@ solar/renewables operations. Its foundation is **built and working**: auth,
 multi-tenancy, RLS isolation, tenant provisioning, invitations, admin UI. Its
 entire operational core — claims, ALA, inspections, work authorizations, service
 reports, warranty registration, O&M authorization — is **fully designed and
-locked (28 architectural decisions)**. The Phase 4 hosted-database baseline (the
+locked (31 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
 construction has started**: the first twenty-six tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
@@ -192,7 +192,7 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   the Six Gates value set is now DRAFTED AND LOCKED** — the `status` CHECK carries
   twelve values (six gate stages + five outcomes); transitions/actors live in the
   C10 Server Actions, not the DB. The sentence that follows described the pre-030
-  state and is retained as history.
+  state and is retained as history. **UPDATE (Decision 31, Chat 27): the C10 claim-progression Server Actions are now BUILT** (`lib/core/claim-progression.ts` + `lib/actions/claims.ts`, `85f7f1b`) — the transition map, actor authorization, the ALA data precondition (19.7), and the escalation-verdict tenant setting all live there per Decision 30.3.
   **Intake form fields and the tokenized intake link are no longer absent:
   migration 027 built them** (see below). Of the shell's four deliberate
   omissions, gate-level state columns remain absent on purpose — Decision 12's
@@ -744,6 +744,19 @@ built as 027, 028, and 029 respectively):
   landed in Chat 22. The pattern's first consuming Server Action is now built — the inspection write-path (`lib/actions/inspections.ts` -> `lib/core/inspections.ts`, 2c76cf0, Chat 23), the reference shape for all future consumers. The lookup-table admin CRUD is now built — create / rename / disable / enable / soft-delete with the full lock_tier permission matrix (17.A.5), value auto-slugified once at create with app-layer uniqueness (arch-ref 6749-6752), team_admin governance gate (`lib/actions/lookup-defaults.ts` -> `lib/core/lookup-defaults.ts`, 15a6779, Chat 23). The pattern application layer is now complete; only its admin UI surface remains (roadmap F10), which is why this is APP-LAYER COMPLETE rather than removed from this list. `Inspections Foundation` has left this list entirely —
   built as 021. `Acknowledgment Gate Pattern` has also left this list entirely —
   built as 023.
+
+- Claim Progression (C10, Decision 31) — BUILT (UI pending): the claim-lifecycle
+  Six Gates status machine (Decision 30 / migration 030's twelve-value enum). The
+  transition map + authorized actors live in the Server Action layer per Decision
+  30.3, not the DB. `lib/core/claim-progression.ts` + `lib/actions/claims.ts`
+  (`85f7f1b`, Chat 27). Recovered from SOP 1 + the Denied/Escalated SOPs + the two
+  Denial-Escalation workbooks. Carries the ALA data precondition (19.7:
+  indistinct_ala_required advances only when the ALA is signed), a per-tenant
+  escalation-verdict authorized role (`tenants.settings.escalation_verdict_authorized_role`,
+  default team_admin — the FIRST built settings-key reader), and a system entry
+  point (`transitionClaimStatusAsSystem`) for the two clock-driven transitions the
+  B-layer will fire. Denial is early-gate only; the map keeps later edges a
+  one-line addition. Only its UI surface remains.
 - Stateless Tokenized Interaction Pattern (applied, not yet coded)
 - FK + Snapshot Pattern, Feature Flag System, Database Migration Tooling, others
 
