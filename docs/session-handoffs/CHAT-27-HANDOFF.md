@@ -88,12 +88,13 @@ Decision 31 (Phase 3 decisions log) records it in full. Key points:
 
 ---
 
-## CARRY-FORWARDS (not blocking; for whoever picks up the named roadmap step)
+## INTERFACE SEAMS (nothing open; these are finished edges, not deferred work)
 
-1. **D2 / provisioning owns seeding `escalation_verdict_authorized_role`.** C10 is
-   correct without it (absent → `team_admin` default), so this is a completeness
-   task, not a blocker. When D2 builds the feature-flag/settings-default seeding,
-   this key joins the list.
+1. **`escalation_verdict_authorized_role` seeding — CLOSED THIS SESSION** (`244d33d`).
+   Seeded in `lib/core/provision-tenant.ts` alongside the six existing settings
+   defaults. New tenants get `'team_admin'` (the bias-prevention default) at
+   provisioning. D2 does NOT own this; it is done. C10 also
+   falls back to the same default if the key is ever absent, so both paths agree.
 2. **B-layer inherits `transitionClaimStatusAsSystem`** as the entry point for the
    two clock-driven transitions (`customer_review → closed` on 3-day silence;
    `denied → closed` on lapsed dispute window). The B-layer must verify the
@@ -106,7 +107,7 @@ Decision 31 (Phase 3 decisions log) records it in full. Key points:
 
 ## OPEN ITEMS — none blocking
 
-Working tree clean, both commits pushed, HEAD = origin, typecheck clean, no
+Working tree clean, all four commits pushed, HEAD = origin, typecheck clean, no
 pending doc-control. No drift carried.
 
 ---
