@@ -88,6 +88,10 @@ export async function provisionTenant(
         ala_markup_percent: 10,
         ala_response_overdue_business_days: 7,
         service_report_response_days: 3,
+        // C10 / Decision 31.4: who may render an escalation verdict.
+        // Default 'team_admin' is the bias-prevention higher-authority path;
+        // a tenant whose process allows it may widen this to 'reviewer'.
+        escalation_verdict_authorized_role: 'team_admin',
       },
     })
     .select('id')
