@@ -226,9 +226,13 @@ customer review, work authorization, ALA signing.
   ~~generation + expiry~~ built as `generateToken` / `tokenExpiresAt(ttlDays)` in
   `lib/core/tokens.ts` (table-agnostic; `invitations.ts` NOT rewired — shared shape,
   not shared store). Two sub-tasks remain, both unbuilt:
-  - [ ] **E1b. Validate + consume helper** — the third primitive's factoring.
-    OPEN, NOT LOCKED (Decision 34.3; dig recorded there — arch-ref, both logs,
-    Phase 0 update, Phase 1 audit all checked, none lock it). Must be parameterized
+  - [x] **E1b. Validate + consume helper** — RESOLVED + BUILT (Decision 35, `0aa08eb`).
+    RESOLVED at the first consumer (C3), Decision 35: the dig reconciled every
+    locked source — mechanism is validate-non-null-unexpired + consume-by-nulling,
+    no consumed column needed (022 arch-ref "null after consumption"; audit trail
+    carried by domain state). Built in `lib/core/tokens.ts` (`0aa08eb`) as
+    `validateToken(table, tokenColumn, token)` + `consumeToken(...)`, dynamic-table
+    per the lookup-defaults precedent, typechecked. Must be parameterized
     by each token's real columns — a TWO-column shape (`{name}_token` +
     `{name}_token_expires_at`), NO consumed column anywhere (six token columns
     across 022/025/026/027/028, zero `consumed_at`; see Decision 34.3

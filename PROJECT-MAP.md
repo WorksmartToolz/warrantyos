@@ -788,20 +788,20 @@ built as 027, 028, and 029 respectively):
   → false). Typed to a flag union so an unknown flag is a compile error. The
   platform-admin toggle surface (part 3) is Phase 4 / roadmap. Introduced zero
   new decisions; the fork was resolved against the arch-ref's own guidance.
-- Stateless Tokenized Interaction Pattern (E1, Decision 34) — PRIMITIVES BUILT,
-  validate/consume PENDING first consumer: the two pure, table-agnostic token
+- Stateless Tokenized Interaction Pattern (E1, Decisions 34 + 35) — COMPLETE
+  (primitives + validate/consume): the two pure, table-agnostic token
   primitives (`generateToken`, `tokenExpiresAt(ttlDays)`) live in
   `lib/core/tokens.ts` (`2fd67f9`, Chat 28) — the "decided once and reused" core
   of the pattern (arch-ref 232-330). `invitations.ts` is deliberately NOT rewired
   (shared shape, not shared implementation — arch-ref "shape to copy, not a shared
-  store"). **OPEN, pinned (Decision 34.3):** the validate + consume factoring is
-  NOT built and NOT locked anywhere (dig recorded in Decision 34 across arch-ref,
-  both logs, Phase 0 update, Phase 1 audit). It must differ per surface's token
-  columns — a two-column shape (`{name}_token` + `{name}_token_expires_at`), NO
-  consumed column on any surface (six tokens across 022/025/026/027/028, zero
-  `consumed_at`), parameterized PER TOKEN not per surface (028 carries two).
-  TRIGGER: resolve it when the FIRST tokenized consumer (C3/C5/C8) is built, against
-  that surface's real columns — see roadmap sub-task E1b + Decision 34.3 CORRECTION.
+  store"). **RESOLVED + BUILT (Decision 35, `0aa08eb`):** validate/consume factored at the
+  first consumer (C3). Mechanism: validate-non-null-unexpired + consume-by-nulling;
+  NO consumed column (022 arch-ref "null after consumption"; audit trail carried by
+  each surface's domain state — responded_at / signed_at / reviewed_at / status).
+  `validateToken(table, tokenColumn, token)` + `consumeToken(...)` in
+  `lib/core/tokens.ts`, dynamic-table per the lookup-defaults precedent, parameterized
+  PER TOKEN (028 carries two). C3's create/submit ACTIONS remain ordinary build work
+  (SOP-confirmed flow: customer submits, WMS catalogs); not blocked on any decision.
 - FK + Snapshot Pattern, Database Migration Tooling, others
 
 ---
