@@ -4,7 +4,7 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last updated:** 2026-07-29 (Chat 28), HEAD `0bf3713`, from verified git history
+**Last updated:** 2026-07-29 (Chat 28), HEAD `2fd67f9`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
 construction is COMPLETE for every table-bearing section (twenty-nine tables +
 one view + three functions built). Chat 20 built the last two: 028
@@ -788,7 +788,18 @@ built as 027, 028, and 029 respectively):
   → false). Typed to a flag union so an unknown flag is a compile error. The
   platform-admin toggle surface (part 3) is Phase 4 / roadmap. Introduced zero
   new decisions; the fork was resolved against the arch-ref's own guidance.
-- Stateless Tokenized Interaction Pattern (applied, not yet coded)
+- Stateless Tokenized Interaction Pattern (E1, Decision 34) — PRIMITIVES BUILT,
+  validate/consume PENDING first consumer: the two pure, table-agnostic token
+  primitives (`generateToken`, `tokenExpiresAt(ttlDays)`) live in
+  `lib/core/tokens.ts` (`2fd67f9`, Chat 28) — the "decided once and reused" core
+  of the pattern (arch-ref 232-330). `invitations.ts` is deliberately NOT rewired
+  (shared shape, not shared implementation — arch-ref "shape to copy, not a shared
+  store"). **OPEN, pinned (Decision 34.3):** the validate + consume factoring is
+  NOT built and NOT locked anywhere (dig recorded in Decision 34 across arch-ref,
+  both logs, Phase 0 update, Phase 1 audit). It must differ per surface's token
+  COLUMN names (`claimant_token` / `customer_token` / `customer_review_token`).
+  TRIGGER: resolve it when the FIRST tokenized consumer (C3/C5/C8) is built, against
+  that surface's real storage coordinates — see roadmap sub-task E1b.
 - FK + Snapshot Pattern, Database Migration Tooling, others
 
 ---

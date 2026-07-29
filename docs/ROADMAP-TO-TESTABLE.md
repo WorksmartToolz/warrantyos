@@ -100,7 +100,7 @@ operational tables require, so operational features fail on a new tenant.
 - [x] ~~**A2. Seed the two `warranty_types` anchor rows.**~~ **Done Chat 24, `ac90fa2`.** Standard + Workmanship, is_system. Seeded LAST (see Findings). *Source: arch-ref 2945; Decision 6.*
 - [x] ~~**A3. Seed the tenant-editable-defaults rows** (4 inspection_types, 8 inspection_triggers).~~ **Done Chat 24, `ac90fa2`,** all platform_locked. *Source: Decision 17.B.*
 - [x] ~~**A4. Seed `tenant_holidays`.**~~ **Done Chat 24, `ac90fa2`.** `federal_holidays_for_year` over the locked 2026-2036 horizon (mirrors 024 backfill), 121 rows. *Source: arch-ref 4275; Decision 25.3.*
-- [x] ~~**A5. Seed provisioning defaults.**~~ **Partially done Chat 24, `ac90fa2`.** The 6 `tenants.settings` scalar keys (ala_signature_method, ala_decline_warning_text, ala_decline_recant_window_days, ala_markup_percent, ala_response_overdue_business_days, service_report_response_days) ARE seeded. The 3 feature flags (epc_workflow, supply_only_workflow, service_report_acquiesce_window) are **NOT** — flag storage + is_feature_enabled reader do not exist yet, so they moved to **D2**. *Source: Decisions 7/19/21/25; flags arch-ref 454-481.*
+- [x] ~~**A5. Seed provisioning defaults.**~~ **Partially done Chat 24, `ac90fa2`.** The 6 `tenants.settings` scalar keys (ala_signature_method, ala_decline_warning_text, ala_decline_recant_window_days, ala_markup_percent, ala_response_overdue_business_days, service_report_response_days) ARE seeded. The 3 feature flags (epc_workflow, supply_only_workflow, service_report_acquiesce_window) were deferred to **D2** and are now seeded there (Chat 28, `0bf3713`) — flag storage + the is_feature_enabled reader were built in the same task. *Source: Decisions 7/19/21/25; flags arch-ref 454-481.*
 
 **Findings from the A1-A5 build (Chat 24) — do not rediscover these:**
 1. **`.env.local` points `NEXT_PUBLIC_SUPABASE_URL` at HOSTED PRODUCTION** (`uzjivnmwedfzcgqnnhos`). Running `provision-tenant.mjs` with no override hits PROD. For local verification, prefix: `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_SERVICE_ROLE_KEY=<local secret from supabase status> npx tsx scripts/...`. A Chat 24 test hit prod before this was caught (rollback cleaned it up). Never run provisioning/seed tests without the local override.
@@ -155,9 +155,11 @@ Each needs a scoping pass before build.
   full), plus label→value slugification for tenant_added. Finishes the
   Tenant-Editable Defaults pattern (flips it off PARTIAL). *Most-locked next
   build. Source: Decision 17.A.4/17.A.5/17.A.7.* **Done Chat 23, `15a6779`.**
-- [ ] **C2. Inspection edit/status-transition actions** — the `open →
-  in_progress → under_review → issued` machine on the built table.
-  *Source: 021; arch-ref inspections section.*
+- [x] ~~**C2. Inspection edit/status-transition actions** — the `open →
+  in_progress → under_review → issued` machine on the built table.~~
+  **Done Chat 28, `0f7bfa9` (code), `2cfcfb0` (Decision 32 + PROJECT-MAP).**
+  Forward-only four-state machine, single `operational` authz class, no system
+  path (021 flags inspection clock_events open). *Source: 021; arch-ref inspections section.*
 - [ ] **C3. Claim intake write-path** — the customer-facing tokenized intake
   form's Server Action (creates the claim from a tokenized submission).
   *Depends on E1 (token infra). Source: 027; arch-ref Claim Intake.*
@@ -200,9 +202,13 @@ Each needs a scoping pass before build.
 
 ## LAYER D — Feature Flag System (thin but gates C-layer behavior)
 
-- [ ] **D2. Build `is_feature_enabled(tenant, feature)` reader** + storage, AND seed the 3 provisioning feature-flag defaults (epc_workflow, supply_only_workflow, service_report_acquiesce_window) deferred from A5, if
+- [x] ~~**D2. Build `is_feature_enabled(tenant, feature)` reader** + storage, AND seed the 3 provisioning feature-flag defaults (epc_workflow, supply_only_workflow, service_report_acquiesce_window) deferred from A5, if
   not already present. Server Actions call it before workflow branches; nothing
-  reads flag storage directly. *Source: arch-ref 393-429.*
+  reads flag storage directly.~~ **Done Chat 28, `0bf3713` (code), `2b762a5`
+  (Decision 33 + PROJECT-MAP).** Storage is JSONB `tenants.settings.enabled_features`
+  (arch-ref part-1 fork exercised as the lighter start, table upgrade held open
+  behind the reader); all 3 flags seeded ENABLED at provisioning; fails closed.
+  *Source: arch-ref 393-429.*
 
 ---
 
@@ -213,9 +219,24 @@ Needs its own scoping pass (never scoped). The six surfaces: claim intake,
 registration-assignee submission, supply-only delivery reporting, service-report
 customer review, work authorization, ALA signing.
 
-- [ ] **E1. Token infrastructure** — generation (high-entropy, single-purpose),
+- [~] **E1. Token infrastructure** — generation (high-entropy, single-purpose),
   expiry, single-use consumption, the tokenized-link email dispatch. Team-invite
   tokens are the *implemented precedent* to mirror. *Source: arch-ref 228-330.*
+  **PARTIAL — pure primitives done Chat 28, `2fd67f9` (Decision 34):**
+  ~~generation + expiry~~ built as `generateToken` / `tokenExpiresAt(ttlDays)` in
+  `lib/core/tokens.ts` (table-agnostic; `invitations.ts` NOT rewired — shared shape,
+  not shared store). Two sub-tasks remain, both unbuilt:
+  - [ ] **E1b. Validate + consume helper** — the third primitive's factoring.
+    OPEN, NOT LOCKED (Decision 34.3; dig recorded there — arch-ref, both logs,
+    Phase 0 update, Phase 1 audit all checked, none lock it). Must be parameterized
+    by each surface's token/expiry/consumed COLUMN names (`claimant_token` /
+    `customer_token` / `customer_review_token` differ per surface). **TRIGGER:
+    resolve against the FIRST tokenized consumer built (C3/C5/C8), NOT in the
+    abstract.** Do not build speculatively — that is the named seam-with-no-
+    subsystem anti-pattern. *Source: arch-ref 254-266; Decision 34.3.*
+  - [ ] **E1c. Tokenized-link email dispatch** — the Resend send of the focused
+    link. Not started. Pairs with each surface's create action. *Source: arch-ref
+    254; Resend account already provisioned.*
 - [ ] **E2. The six tokenized public interfaces** (no-auth routes rendering the
   focused form for each surface, calling the matching C-layer action). Each pairs
   with its C-layer entry above. *Source: arch-ref 270-320.*

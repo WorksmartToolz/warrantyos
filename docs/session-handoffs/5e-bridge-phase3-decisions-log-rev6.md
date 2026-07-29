@@ -5788,3 +5788,83 @@ features" and part 4. D2 introduced zero new decisions — the build-era outcome
 `lib/core/features/is-feature-enabled.ts` (new) and `lib/core/provision-tenant.ts`
 (seeding + note replacement). Typechecked (`tsc --noEmit` clean). Committed
 `0bf3713`, pushed Chat 28.
+
+## Decision 34: Stateless Tokenized Interaction — Shared Token Primitives (E1), Validate/Consume Deferred
+
+Built Chat 28. The two pure, table-agnostic token primitives shared by all six
+tokenized surfaces, extracted as the "decided once and reused" core of the
+Stateless Tokenized Interaction Pattern (arch-ref 232-330). One new file:
+`lib/core/tokens.ts`. No existing code edited.
+
+**34.1: Two pure primitives only.** `generateToken()` returns the high-entropy
+token (32 random bytes as 64-char hex — the exact shape the invitation flow
+established and the arch-ref locks for all six surfaces). `tokenExpiresAt(ttlDays)`
+returns the expiry ISO timestamp, with TTL as a PARAMETER rather than the
+invitation flow's hardcoded 7 days, because the tokenized surfaces carry their
+own windows (some per-tenant configurable — the ALA recant window, the
+customer-review window). Both are table-agnostic: they touch no database and know
+about no surface. The caller writes the token onto its own record's token column.
+
+**34.2: invitations.ts is deliberately NOT rewired to depend on tokens.ts.** The
+arch-ref frames the invitation flow as "the SHAPE to copy, not a shared store,"
+and distinguishes the invitation token (authenticates a future USER) from the
+stateless tokens (authenticate a party who will never be a user). Coupling the
+two implementations would merge things the arch-ref keeps conceptually distinct,
+and would churn working, committed auth-path code for a cosmetic DRY gain
+(Standing Order #2: not the tidy route, the locked-decision route). They share a
+shape, not an implementation — exactly as the arch-ref frames it. `invitations.ts`
+keeps its own 7-day wrappers untouched.
+
+**34.3 (OPEN — pinned deferral): validate + consume factoring is NOT built and
+NOT locked.** The third pattern primitive (the consumption record) needs a
+validate-and-consume helper. The invitation precedent's
+`validateInvitationToken` / `consumeInvitationToken` are hardcoded to
+`.from('invitations')`. A generalized version must be parameterized by each
+surface's table AND its token/expiry/consumed COLUMN NAMES, which genuinely
+differ per surface (`claimant_token` on claims, `customer_token` on work
+authorization, `customer_review_token` on service-report review — confirmed by
+grep this session). HOW to factor this — a single dynamic-table primitive vs.
+each surface writing its own literal-table check (the codebase's existing idiom)
+— is an OPEN fork.
+
+**The dig is recorded so it is not repeated.** This session checked, and none of
+these locks the factoring: the arch-ref pattern section (locks the token SHAPE
+and the "own token on own record" storage rule, but not the helper factoring);
+BOTH decisions logs (the only "single canonical validation function" is the
+Tenant-Editable Defaults helper — a different subsystem); the Phase 0 update
+(treats delivery-reporting as an application of the pattern, "not a new
+pattern"); and the Phase 1 audit (documents the `consumed_at` column and the
+`invitations.ts` precedent, but locks no generalization). The shape is locked;
+the factoring is open.
+
+**TRIGGER CONDITION (pinned):** resolve 34.3 when the FIRST tokenized consumer is
+built — C3 (claim intake), C5 (work authorization), or C8 (service report) —
+against that surface's REAL storage coordinates, NOT in the abstract. Building it
+now with no consumer to fix the column names against would be guessing a
+signature we'd rework — the "seam facing a subsystem that doesn't exist yet"
+anti-pattern. This deferral is pinned in three places (this decision, roadmap
+sub-task E1b, PROJECT-MAP's Stateless Tokenized entry) so it cannot be lost.
+
+### Design-fresh elements (flagged honestly)
+None built. 34.1 and 34.2 trace to the arch-ref pattern section (the locked shape
+and the "shape not store" framing). 34.3 is an HONESTLY-FLAGGED open fork after
+an exhaustive dig turned up no lock — brought as a pinned deferral with its
+trigger condition, NOT resolved by improvisation. The one cosmetic call (module
+at `lib/core/tokens.ts`, function names) is the docs/code maintainer's lane, not
+architecture.
+
+### Decision implications for already-committed sections
+- **Arch-ref "Stateless Tokenized Interaction Pattern".** Its Status line reads
+  "the tokenized-link mechanism is Implemented for team invitations; its
+  application ... is Designed." E1's primitives now begin the app-layer build of
+  that application. No arch-ref Status edit yet — the pattern is not fully coded
+  until the surfaces and the validate/consume helper (34.3) land.
+- **`invitations.ts`.** Untouched (34.2). Not superseded; it remains the working
+  invitation path and the shape precedent.
+- **Tokenized consumers (C3/C5/C8, roadmap).** Each can now call `generateToken`
+  and `tokenExpiresAt` for the create side. Each still owns its own token
+  storage on its own row. The FIRST one built also resolves 34.3.
+
+### Implementation status
+`lib/core/tokens.ts` (new, two pure primitives). No existing code edited.
+Typechecked (`tsc --noEmit` clean). Committed `2fd67f9`, pushed Chat 28.
