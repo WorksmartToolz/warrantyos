@@ -203,5 +203,15 @@ finds the panel behind disk, re-swap and verify with `diff -q`.)
 should move to `4398e2b`. NOT done this session (ran to close-out) — first doc
 drift for the next chat to fix under Standing Order #1.
 
+**Files-panel naming drift:** the panel entries carry `-v2` suffixes
+(`PROJECT-MAP-v2.md`, `ROADMAP-TO-TESTABLE-v2.md`,
+`5e-bridge-phase3-decisions-log-rev6-v2.md`) while the repo/disk files are
+canonical-named (no suffix). The doc-control convention is: download gets the
+suffix, PANEL ENTRY STAYS CANONICAL — so the panel has drifted. Content is
+verified-correct (all three `diff -q`-clean vs disk at Chat 29 close); this is
+COSMETIC naming only. This handoff and all canonical docs reference the real
+repo names (no `-v2`) — that is correct; read from the repo via `git`, not from
+panel labels. Second cosmetic item for the next chat under Standing Order #1.
+
 **This handoff (CHAT-29-HANDOFF.md)** was produced as a chat download and `cp`-ed
 into `docs/session-handoffs/`, then committed. Verify via `git log`.
