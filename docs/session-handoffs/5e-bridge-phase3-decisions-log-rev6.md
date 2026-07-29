@@ -5638,6 +5638,7 @@ concrete, anything is possible even if it hasn't happened yet").
   `escalation_verdict_authorized_role` default alongside the other deferred
   provisioning defaults. C10 is correct without it (absent → safe default), so
   this is a completeness task, not a blocker.
+  _[Superseded Chat 28: this seeding was CLOSED in `244d33d` — the `escalation_verdict_authorized_role` default is now seeded in `lib/core/provision-tenant.ts` alongside the other provisioning defaults. D2 does not own it. Left in place per Convention 7; this note is the correction.]_
 
 ### Implementation status
 
@@ -5645,3 +5646,61 @@ concrete, anything is possible even if it hasn't happened yet").
 settings reader, user + system entry points) and `lib/actions/claims.ts` (thin
 `progressClaim` Server Action). Typechecked (`tsc --noEmit` clean). Committed
 `85f7f1b`, pushed Chat 27.
+
+## Decision 32: Inspection-Progression Server Actions (C2) — Forward-Only Status Machine
+
+Built Chat 28. The inspection status machine, the app-layer counterpart to C10
+for the `inspections` table. Two files: `lib/core/inspection-progression.ts`
+(transition map, operational authorization, executor) and the extended
+`lib/actions/inspections.ts` (thin `progressInspection` Server Action alongside
+the existing `createInspection`).
+
+**32.1: The transition map is the linear forward chain, forward-only.**
+`open → in_progress → under_review → issued`, with `issued` terminal. Recovered
+directly from migration 021's `status` column comment, which defines exactly
+this chain and states that "Backward transitions are not part of the
+architectural commitment at this layer." No reopen or backward edge is invented.
+A transition not in the map is illegal and rejected regardless of caller role.
+The map lives in the Server Action layer, not the DB (Decision 17.A.6: no
+triggers at v1); the 021 CHECK enforces only the closed four-value set.
+
+**32.2: One authorization class only — `operational` (reviewer OR team_admin).**
+Identical to the built inspection write-path (`lib/core/inspections.ts`,
+arch-ref 780 / 5145-5148): role, tenant, active status, and not-removed are read
+from the DB row, never from client input; viewers hold no write authority.
+Unlike C10, C2 has NO `escalation_verdict` class (inspections carry no
+tenant-configurable verdict) and NO `system` class. The absence of a system path
+is deliberate: migration 021 flags inspection `clock_events` wiring as an OPEN,
+deferred question, so nothing in the locked sources gives an inspection a
+clock-driven transition. `transitionInspectionStatusAsSystem` is therefore NOT
+written — adding it would be improvising architecture ahead of the B-layer.
+
+**32.3: Optimistic concurrency guard on the status write.** Same pattern as
+Decision 31.5: the update writes `status = to WHERE id = inspectionId AND
+status = from` (the validated current value), so a concurrent transition cannot
+be silently clobbered. The core function returns the inspection's `claim_id` on
+success so the wrapper can revalidate the parent claim page that aggregates
+inspections.
+
+### Design-fresh elements (flagged honestly)
+None. C2 introduced zero new decisions. Every element traces to already-locked
+sources read this session: the 021 `status` column comment (the chain and the
+no-backward-commitment), 021's Decision 17.A.6 (app-layer machine, no triggers),
+the built inspection write-path's committed authorization citation (arch-ref
+780 / 5145-5148), and the C10 idiom (Decision 31). The dig found no gap requiring
+a decision — the correct outcome for a build task in the build era.
+
+### Decision implications for already-committed sections
+- **Migration 021.** Its `status` column comment already anticipated this
+  app-layer machine (the transition semantics live in the comment; 17.A.6 places
+  enforcement in code). 032 fills that in. No schema change.
+- **B-layer (roadmap).** Does NOT inherit a system entry point from C2, unlike
+  C10. There is no `transitionInspectionStatusAsSystem` — a future chat should
+  not hunt for one. If inspection `clock_events` wiring is ever locked (021
+  flags it open), a system path would be added THEN, as its own decision.
+- **UI (roadmap).** `progressInspection`'s `revalidatePath` targets are safe
+  no-ops until the claim/inspection routes exist, identical to `createInspection`.
+
+### Implementation status
+`lib/core/inspection-progression.ts` and `lib/actions/inspections.ts` (extended).
+Typechecked (`tsc --noEmit` clean). Committed `0f7bfa9`, pushed Chat 28.

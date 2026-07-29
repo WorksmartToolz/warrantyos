@@ -4,7 +4,7 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last updated:** 2026-07-22 (Chat 27), HEAD `85f7f1b`, from verified git history
+**Last updated:** 2026-07-29 (Chat 28), HEAD `0f7bfa9`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
 construction is COMPLETE for every table-bearing section (twenty-nine tables +
 one view + three functions built). Chat 20 built the last two: 028
@@ -381,7 +381,11 @@ Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
   dependencies explicitly deferred downstream), no clock_events wiring (flagged
   open), and no trigger enforcing the snapshot sync invariant (17.A.6: no
   triggers at v1). The tenant-match invariant and the canonical validation rule
-  are app-layer.
+  are app-layer. **UPDATE (Decision 32, Chat 28): the C2 inspection-progression
+  Server Actions are now BUILT** (`lib/core/inspection-progression.ts` + the
+  extended `lib/actions/inspections.ts`, `0f7bfa9`) — the forward-only status
+  machine described above (`open → in_progress → under_review → issued`) lives
+  there, app-layer per 17.A.6, single `operational` authz class, no system path.
 - **`work_authorization_templates`**, **`work_authorization_documents`**, and
   **`work_authorization_revisions`** (022) — Customer Work Authorization
   (Decision 11): the customer-facing **COMMITMENT** generated from a Work
@@ -757,6 +761,19 @@ built as 027, 028, and 029 respectively):
   point (`transitionClaimStatusAsSystem`) for the two clock-driven transitions the
   B-layer will fire. Denial is early-gate only; the map keeps later edges a
   one-line addition. Only its UI surface remains.
+- Inspection Progression (C2, Decision 32) — BUILT (UI pending): the inspection
+  status machine (migration 021's four-value `status` enum). Forward-only linear
+  chain `open → in_progress → under_review → issued`, `issued` terminal — the 021
+  status comment commits to no backward transitions. The transition map + authz
+  live in the Server Action layer per Decision 17.A.6 (no triggers at v1), not the
+  DB. `lib/core/inspection-progression.ts` + the extended `lib/actions/inspections.ts`
+  (`0f7bfa9`, Chat 28). ONE authorization class — `operational` (reviewer OR
+  team_admin), identical to the inspection write-path. Unlike C10: NO
+  escalation-verdict class (inspections carry no tenant verdict) and NO system path
+  (021 flags inspection clock_events wiring as open, so no clock-driven transition
+  exists to fire — `transitionInspectionStatusAsSystem` deliberately not written).
+  Introduced zero new decisions; every element traced to 021 + the write-path +
+  C10. Only its UI surface remains.
 - Stateless Tokenized Interaction Pattern (applied, not yet coded)
 - FK + Snapshot Pattern, Feature Flag System, Database Migration Tooling, others
 
