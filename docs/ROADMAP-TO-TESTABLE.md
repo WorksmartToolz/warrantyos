@@ -229,8 +229,14 @@ customer review, work authorization, ALA signing.
   - [ ] **E1b. Validate + consume helper** — the third primitive's factoring.
     OPEN, NOT LOCKED (Decision 34.3; dig recorded there — arch-ref, both logs,
     Phase 0 update, Phase 1 audit all checked, none lock it). Must be parameterized
-    by each surface's token/expiry/consumed COLUMN names (`claimant_token` /
-    `customer_token` / `customer_review_token` differ per surface). **TRIGGER:
+    by each token's real columns — a TWO-column shape (`{name}_token` +
+    `{name}_token_expires_at`), NO consumed column anywhere (six token columns
+    across 022/025/026/027/028, zero `consumed_at`; see Decision 34.3
+    CORRECTION). Parameterize PER TOKEN, not per surface: 028 carries TWO
+    (`submission_token` + `customer_review_token`), so a one-token-per-consumer
+    signature is already wrong. First consumers: `intake_token` (C3/027),
+    `customer_token` (C5/022), and C8/028's pair. Single-use enforcement without
+    a consumed column is E1b's real open question. **TRIGGER:
     resolve against the FIRST tokenized consumer built (C3/C5/C8), NOT in the
     abstract.** Do not build speculatively — that is the named seam-with-no-
     subsystem anti-pattern. *Source: arch-ref 254-266; Decision 34.3.*

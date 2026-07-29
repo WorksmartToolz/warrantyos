@@ -5845,6 +5845,47 @@ signature we'd rework — the "seam facing a subsystem that doesn't exist yet"
 anti-pattern. This deferral is pinned in three places (this decision, roadmap
 sub-task E1b, PROJECT-MAP's Stateless Tokenized entry) so it cannot be lost.
 
+**34.3 CORRECTION (Chat 29, from 027 + 022/025/026 bytes — supersedes the two
+storage claims above; 34.3's open-fork status is UNCHANGED and still governs).**
+Two factual errors in the text above, found by reading the migrations directly:
+
+1. **The claims-side column is `intake_token` (+ `intake_token_expires_at`), not
+   `claimant_token`.** `claimant_token` is `ala_documents`' column (025).
+   Confirmed: 027 built `intake_token` / `intake_token_expires_at` on `claims`;
+   grep of 025 confirms `claimant_token` belongs to the ALA surface.
+
+2. **There is NO consumed column on any per-row tokenized surface** — so E1b
+   canNOT be "parameterized by each surface's consumed column name," because
+   none exists. `claims` (027), `work_authorization_documents` (022),
+   `ala_documents` (025), and `notices_of_defect` (026) are ALL two-column:
+   `{surface}_token` + `{surface}_token_expires_at`, four-for-four, no
+   `consumed_at`. The `consumed_at` named above was inherited from the
+   `invitations` SHARED-STORE precedent (001), which has one because the token
+   is its lookup key; the per-row "shape to copy, not shared store" surfaces
+   deliberately do not copy it.
+
+   **Consequence for E1b (sharpens, does not resolve, the open fork):** the real
+   question is how single-use is enforced on a surface with NO consumed column.
+   E1b must be built against the two-column shape actually on disk, and must
+   settle single-use enforcement (candidates NOT yet chosen: status transition
+   off the create-time state, nulling the token on use, or a consumed column
+   added at that point) against the FIRST consumer's real write-path — the same
+   trigger 34.3 already pins. The three-place pin still holds; roadmap E1b and
+   PROJECT-MAP's Stateless Tokenized entry carry the same correction in their
+   own doc-control commits.
+
+3. **Undercount fix (same session, from 028's bytes): it is SIX token columns
+   across FIVE migrations, not four-for-four.** Bullet 2 omitted 028
+   (`service_reports`), which carries TWO tokens — `submission_token` (the
+   subcontractor's submit link) and `customer_review_token` (the customer's
+   review link) — each with its own `_expires_at`, neither with a `consumed_at`.
+   Full set: `intake_token` (027), `customer_token` (022), `claimant_token`
+   (025), `recipient_token` (026), `submission_token` + `customer_review_token`
+   (028). **Consequence: E1b parameterizes PER TOKEN, not per surface** — a
+   one-token-per-consumer signature is already wrong at 028. The two-column
+   shape and the no-`consumed_at` finding both still hold across all six.
+
+
 ### Design-fresh elements (flagged honestly)
 None built. 34.1 and 34.2 trace to the arch-ref pattern section (the locked shape
 and the "shape not store" framing). 34.3 is an HONESTLY-FLAGGED open fork after

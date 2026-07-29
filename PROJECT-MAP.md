@@ -797,9 +797,11 @@ built as 027, 028, and 029 respectively):
   store"). **OPEN, pinned (Decision 34.3):** the validate + consume factoring is
   NOT built and NOT locked anywhere (dig recorded in Decision 34 across arch-ref,
   both logs, Phase 0 update, Phase 1 audit). It must differ per surface's token
-  COLUMN names (`claimant_token` / `customer_token` / `customer_review_token`).
+  columns — a two-column shape (`{name}_token` + `{name}_token_expires_at`), NO
+  consumed column on any surface (six tokens across 022/025/026/027/028, zero
+  `consumed_at`), parameterized PER TOKEN not per surface (028 carries two).
   TRIGGER: resolve it when the FIRST tokenized consumer (C3/C5/C8) is built, against
-  that surface's real storage coordinates — see roadmap sub-task E1b.
+  that surface's real columns — see roadmap sub-task E1b + Decision 34.3 CORRECTION.
 - FK + Snapshot Pattern, Database Migration Tooling, others
 
 ---
