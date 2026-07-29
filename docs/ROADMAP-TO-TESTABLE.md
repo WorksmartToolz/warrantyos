@@ -74,7 +74,7 @@ digs before building.
 
 ---
 
-## ⚠️ DESIGN GAP — must be resolved before a full claim can be tested end-to-end
+## ✅ DESIGN GAP (RESOLVED) — D1 closed Chat 25/26 (Decision 30, migration 030); C10 built Chat 27 (`85f7f1b`, Decision 31)
 
 - [x] ~~**D1. Draft the Tier 3 Claim Lifecycle (Six Gates) design.**~~ **Done Chat 25 (design + ratification), committed Chat 26 (`0b27f70` migration 030, `a7658b3` Decision 30 log).** The twelve-value claim `status` enum is locked — six gate stages + five outcomes; transitions/actors live in C10 Server Actions (Decision 30.3). Original framing preserved below as history. This was a
   DESIGN task, not a build task — it is NOT yet locked. The claim `status` value
@@ -183,9 +183,12 @@ Each needs a scoping pass before build.
 - [ ] **C9. Customer-O&M Authorization actions** — per-event agent authorization,
   tokenized customer signature, status machine (unsigned/signed/closed/stale).
   *Source: 029; Decision 28.*
-- [ ] **C10. Claim lifecycle / gate-progression actions** — the Six Gates
-  transitions, accept/deny/escalate. **BLOCKED on D1** (design gap above).
-  *Source: to-be-drafted Tier 3 lifecycle design.*
+- [x] ~~**C10. Claim lifecycle / gate-progression actions** — the Six Gates
+  transitions, accept/deny/escalate.~~ **Done Chat 27, `85f7f1b`** (core +
+  `lib/actions/claims.ts`). Six Gates transition map + authorized actors in the
+  Server Action layer per Decision 30.3; escalation-verdict tenant setting; system
+  entry point for the two clock-driven transitions the B-layer will fire. UI (F1)
+  remains. *Source: Decision 30/31; migration 030.*
 - [ ] **C11. Warranty Registration + trigger actions** — assignee submission,
   the multi-source trigger model (EPC / supply-only / delivery-report),
   warranty_id issuance; writes `registration_prep_pre_trigger` /
@@ -214,7 +217,7 @@ Each needs a scoping pass before build.
 
 ## LAYER E — Stateless Tokenized Interaction infrastructure (six surfaces)
 
-The customer-facing half. Applied in schema across the entities; zero coded.
+The customer-facing half. Applied in schema across the entities; primitives + validate/consume coded (E1, Decisions 34/35).
 Needs its own scoping pass (never scoped). The six surfaces: claim intake,
 registration-assignee submission, supply-only delivery reporting, service-report
 customer review, work authorization, ALA signing.
@@ -284,6 +287,12 @@ is unbuilt. The revalidate paths written in C-layer point at these routes.
 ---
 
 ## Suggested first moves from here (Andre decides)
+
+> **SUPERSEDED (Chat 30).** All three items below are complete: C1 (Chat 23,
+> `15a6779`), A1–A5 (Chat 24, `ac90fa2`), D1 (Chat 25/26). Live next moves:
+> **C3 create/submit** (token layer's first consumer, carries E1c email),
+> **C4-create** (independent, finishable), **B-layer** (dedicated session).
+> Original block preserved below as history (Convention 7).
 
 1. **C1 (lookup admin CRUD)** — most-locked, reuses Chat 23's exact shape,
    finishes the Tenant-Editable Defaults pattern. Cleanest single-session win.

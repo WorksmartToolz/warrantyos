@@ -396,8 +396,8 @@ the path lists start to hurt.
 
 ## Feature Flag System
 
-**Status: Designed** (locked by Phase 0 Item 18; not yet built. The storage
-mechanism is an open Phase 3 implementation choice, noted below.)
+**Status: Implemented (schema)** (locked by Phase 0 Item 18; built as D2, Chat 28. Storage
+resolved to JSONB by Decision 33.2; tenant_features table held open, noted below.)
 
 Tenants operate in different business shapes — pure EPC, pure supply-only, or
 hybrid. If every tenant got every workflow by default, a pure-EPC firm's
@@ -1288,7 +1288,7 @@ six pre-procedure verification gates per Decision 22.3, the drift verification
 gate per Decision 22.9, the six named failure modes per Decision 22.5, the
 Mode C gating per Decision 22.10, and the four Phase 4 transition criteria per
 Decision 22.8 are architecturally locked. Procedure execution against the
-hosted database is Phase 4 work, gated by the CLAUDE-rev6.md stop-point until all
+hosted database was completed in Phase 4 (baseline DONE; execution record on disk); all
 four transition criteria in Decision 22.8 are satisfied. This section is the
 authoritative reference for the procedure and for ongoing migration tooling
 mechanics across the platform lifecycle.)
@@ -6891,7 +6891,7 @@ Parallel to the deliberate-omissions lists elsewhere:
 
 ## Tenant-Editable Defaults Pattern
 
-**Status: Partially implemented (schema).** This is a Tier 1 platform-wide
+**Status: Implemented (schema).** This is a Tier 1 platform-wide
 pattern locked by Decision 17 Part A (Phase 3 decisions log). The pattern's
 canonical lookup table shape is built: both canonical applications exist as
 migrations -- inspection_types (018) and inspection_triggers (019) per
@@ -6902,9 +6902,9 @@ six-step convention below is now built: the operational table (inspections,
 migration 021) carries both FK + value snapshot column pairs in the shape the
 "Operational table integration via FK + Snapshot" subsection specifies, with
 ON DELETE RESTRICT on both lookup FKs per this pattern's soft-delete
-semantics. Step 5 remains unbuilt: the canonical validation helper is
-application-layer and does not yet exist, so the status stays Partially
-implemented until it lands. Per Decision 17.A.6 no
+semantics. Step 5 is built (d127cc3): the canonical validation helper is
+application-layer, built as validateTenantEditableDefaultsReference (17.A.6.1);
+consumed by 2c76cf0 and 15a6779. Only the F10 UI remains. Per Decision 17.A.6 no
 PostgreSQL triggers are introduced at v1; the lookup tables are in their
 final schema shape, so the future migration to trigger enforcement remains
 a pure DB-layer change. Logical placement is alongside the other Tier 1

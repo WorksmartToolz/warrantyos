@@ -4,7 +4,7 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last updated:** 2026-07-29 (Chat 28), HEAD `2fd67f9`, from verified git history
+**Last updated:** 2026-07-29 (Chat 30), HEAD `24cef98`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
 construction is COMPLETE for every table-bearing section (twenty-nine tables +
 one view + three functions built). Chat 20 built the last two: 028
@@ -22,9 +22,9 @@ solar/renewables operations. Its foundation is **built and working**: auth,
 multi-tenancy, RLS isolation, tenant provisioning, invitations, admin UI. Its
 entire operational core — claims, ALA, inspections, work authorizations, service
 reports, warranty registration, O&M authorization — is **fully designed and
-locked (31 architectural decisions)**. The Phase 4 hosted-database baseline (the
+locked (35 architectural decisions)**. The Phase 4 hosted-database baseline (the
 gate that had to precede any Phase 3 table) is **done**, and **Phase 3 table
-construction has started**: the first twenty-six tables (`contacts`, `projects`,
+construction has started**: the first twenty-nine tables (`contacts`, `projects`,
 `import_batches`, `tenant_id_sequences`, `warranty_registrations`,
 `warranty_types`, `warranty_coverages`, `clock_events`, `internal_teams`,
 `custom_field_definitions`, `claims`, `custom_field_values`,
@@ -49,7 +49,7 @@ between them closed. The era is now building, not designing.
 | Phase 1 | Architecture audit catalog | Done (analysis) |
 | Phase 2 | Decisions 1–10 (core patterns) | Done (design) |
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
-| Phase 3 | Decisions 11–28: all entity/workflow architecture | Done (design) |
+| Phase 3 | Decisions 11–35: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
 | Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (29 tables + 1 view + 3 functions built — all table-bearing sections complete)** |
 
@@ -67,7 +67,7 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 27** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 31** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
@@ -78,8 +78,8 @@ migrations (005, 006).
   **022_customer_work_authorization**, **023_acknowledgment_gate**,
   **024_tenant_holidays**, **025_ala_system**,
   **026_notices_of_defect**, **027_claim_intake**,
-  **028_service_report_submission**, and **029_customer_om_authorization**
-  (Phase 3 tables, the FK
+  **028_service_report_submission**, **029_customer_om_authorization**, and **030_claim_lifecycle_status**
+  (Phase 3 tables, the claim-lifecycle status enum (030, Decision 30), the FK
   constraints closing them,
   the `warranty_coverages_effective` view, and the three business-day calendar
   functions).
