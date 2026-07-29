@@ -92,6 +92,15 @@ export async function provisionTenant(
         // Default 'team_admin' is the bias-prevention higher-authority path;
         // a tenant whose process allows it may widen this to 'reviewer'.
         escalation_verdict_authorized_role: 'team_admin',
+        // D2: feature-flag defaults (arch-ref part 4, opt-out model). All
+        // three Phase-1 flags enabled at provisioning; a platform admin
+        // disables one selectively for a pure-shape tenant. Read only
+        // through lib/core/features/is-feature-enabled.ts.
+        enabled_features: {
+          epc_workflow: true,
+          supply_only_workflow: true,
+          service_report_acquiesce_window: true,
+        },
       },
     })
     .select('id')
@@ -133,9 +142,10 @@ export async function provisionTenant(
   // then returns an error. (Option B, app-level compensating rollback --
   // the Supabase JS client has no multi-statement transaction.)
   // Feature flags (epc_workflow, supply_only_workflow,
-  // service_report_acquiesce_window) are intentionally NOT seeded here: the
-  // feature-flag storage shape + is_feature_enabled reader do not exist yet
-  // (roadmap D2). D2 seeds its own flag defaults at provisioning.
+  // service_report_acquiesce_window) are seeded above in the tenant
+  // settings blob (enabled_features), all three enabled per the arch-ref
+  // opt-out model. D2 (Chat 28) built the is-feature-enabled reader and
+  // this seeding together.
   // --------------------------------------------------------------------------
   const rollbackTenant = async (reason: string): Promise<ProvisionTenantResult> => {
     await admin.from('tenant_holidays').delete().eq('tenant_id', tenant.id)
