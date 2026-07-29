@@ -5909,3 +5909,69 @@ architecture.
 ### Implementation status
 `lib/core/tokens.ts` (new, two pure primitives). No existing code edited.
 Typechecked (`tsc --noEmit` clean). Committed `2fd67f9`, pushed Chat 28.
+
+---
+
+## Decision 35 — E1b resolved: validate-non-null-unexpired, consume-by-nulling; audit trail carried by domain state (Chat 29)
+
+**Supersedes 34.3's OPEN status.** The validate/consume factoring is no longer an
+open fork. It resolved by reading the locked sources to the floor at the first
+consumer (C3/claim intake), exactly as 34.3's trigger required — not by choice.
+
+**The mechanism (uniform across all per-row tokenized surfaces):**
+- **Validate:** `{token} = ? AND {token} IS NOT NULL AND {token}_expires_at > now()`.
+  A null token is structurally unvalidatable — not-yet-issued OR already-consumed,
+  both correctly non-grantable.
+- **Consume:** set `{token} = NULL`, in the SAME atomic Server Action that writes
+  the surface's domain result. Not a separate step.
+- **Parameterized PER TOKEN COLUMN**, not per surface (028 carries two:
+  `submission_token` + `customer_review_token`). Two-column shape; NO
+  `consumed_at`, matching all five migrations as built (022/025/026/027/028).
+
+**Why nulling, not a consumed_at timestamp — the dig, shown:**
+- `invitations.ts` (the only built consume path) validates on `consumed_at IS
+  NULL` and consumes by setting `consumed_at` — the SHARED-STORE shape. The
+  per-row surfaces built NO `consumed_at`, so that function cannot be copied.
+  That is exactly why 34.3 was left open.
+- Arch-ref 022 column spec (disk ~5832): `customer_token` is "single-use ... null
+  after consumption" — the one explicit per-row consumption mechanism in the
+  locked sources, and it is nulling.
+- The general pattern section (arch-ref ~260) frames the invitations shape as
+  "token / expires_at / consumed_at." DESIGN-ERA framing for the shared store;
+  the newer migrations supersede it for per-row surfaces (naming-collapse
+  precedent: committed migration headers beat design-era arch-ref sketches).
+
+**The audit trail is NOT lost by nulling — it was never the token's job.**
+Arch-ref (disk 5809-5811, work authorization): the customer's identity capture,
+the `responded_at` timestamp, and "the audit trail through tokenized link
+consumption" TOGETHER preserve the authorization record. The consumption record
+lives on each surface's DOMAIN state, which carries more audit value than a
+generic `consumed_at`. Confirmed against locked sources for ALL six surfaces:
+- **022 (work auth):** `responded_at` (disk line 301) + `authorization_acknowledged`
+  + `request_completed_by_name`.
+- **025 (ALA):** `signed_at` + `signer_name`/`signer_email` + the
+  (`claimant_decision`, `signed_at`) state combination — the legal record
+  (arch-ref 3975-4137).
+- **028 (service report):** `reviewed_at` (arch-ref 4801/4920) for the customer
+  review token; the submitter token's submission is recorded on the same row.
+  NOTE: the "registration assignee submission" surface the pattern names IS this
+  028 submitter path (arch-ref 4890-4906) — not a separate surface.
+- **027 (claim intake):** `status` transition off `intake_received` + row
+  timestamps; 027's header locks "a claim row exists only once intake completes,
+  fully populated."
+- **Delivery reporting (supply-only):** `trigger_status` transition `pending ->
+  confirmed` + `trigger_date` recorded, via synchronous Server Action (arch-ref
+  2833-2845, Decision 23 / Item 17). Same state-as-consumption shape as claims;
+  conforms to the locked supply-only model, no new mechanism.
+
+All six surfaces record consumption via a domain state transition or timestamp
+already locked. No surface relies on the token for its audit trail; nulling
+destroys nothing.
+
+**Consequence for the three pins (34.3):** E1b RESOLVED. Roadmap E1b and
+PROJECT-MAP's Stateless Tokenized entry graduate from "OPEN, pinned" to "resolved
+at C3, Decision 35"; their doc-control updates land with C3's build commit.
+
+**Design-fresh elements:** none. The mechanism and the audit backstop are read
+from locked sources; the only maintainer's-lane calls are the helper's function
+names and file location.
