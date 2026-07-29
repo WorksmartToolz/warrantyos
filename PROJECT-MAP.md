@@ -4,7 +4,7 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last updated:** 2026-07-29 (Chat 28), HEAD `0f7bfa9`, from verified git history
+**Last updated:** 2026-07-29 (Chat 28), HEAD `0bf3713`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
 construction is COMPLETE for every table-bearing section (twenty-nine tables +
 one view + three functions built). Chat 20 built the last two: 028
@@ -774,8 +774,22 @@ built as 027, 028, and 029 respectively):
   exists to fire — `transitionInspectionStatusAsSystem` deliberately not written).
   Introduced zero new decisions; every element traced to 021 + the write-path +
   C10. Only its UI surface remains.
+- Feature Flag Reader (D2, Decision 33) — BUILT (toggle UI pending): the
+  single-source-of-truth helper `isFeatureEnabled(tenantId, feature) → boolean`
+  (`lib/core/features/is-feature-enabled.ts`) plus its provisioning defaults
+  (`0bf3713`, Chat 28). Storage is JSONB `tenants.settings.enabled_features` —
+  the arch-ref part-1 open fork EXERCISED as the named "lighter starting point,"
+  NOT foreclosed: the `tenant_features` table upgrade stays available behind the
+  helper (changes only its internals, no caller), its trigger condition recorded
+  in Decision 33.2. Three Phase-1 flags (`epc_workflow`, `supply_only_workflow`,
+  `service_report_acquiesce_window`), all seeded ENABLED at provisioning
+  (opt-out model, arch-ref part 4) — this replaced the prior "intentionally NOT
+  seeded here" deferral in `provision-tenant.ts`. Fails closed (absent/malformed
+  → false). Typed to a flag union so an unknown flag is a compile error. The
+  platform-admin toggle surface (part 3) is Phase 4 / roadmap. Introduced zero
+  new decisions; the fork was resolved against the arch-ref's own guidance.
 - Stateless Tokenized Interaction Pattern (applied, not yet coded)
-- FK + Snapshot Pattern, Feature Flag System, Database Migration Tooling, others
+- FK + Snapshot Pattern, Database Migration Tooling, others
 
 ---
 

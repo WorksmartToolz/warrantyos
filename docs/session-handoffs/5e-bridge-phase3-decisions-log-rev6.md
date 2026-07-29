@@ -5704,3 +5704,87 @@ a decision — the correct outcome for a build task in the build era.
 ### Implementation status
 `lib/core/inspection-progression.ts` and `lib/actions/inspections.ts` (extended).
 Typechecked (`tsc --noEmit` clean). Committed `0f7bfa9`, pushed Chat 28.
+
+## Decision 33: Feature Flag Reader (D2) — is-feature-enabled Helper, JSONB Storage, and Provisioning Seeding
+
+Built Chat 28. The feature-flag application-layer helper (arch-ref "The feature
+flag system", part 2) plus its provisioning defaults (part 4). Two files:
+`lib/core/features/is-feature-enabled.ts` (new) and `lib/core/provision-tenant.ts`
+(seeding added, prior deferral note replaced).
+
+**33.1: The reader is the single source of truth.** `isFeatureEnabled(tenantId,
+feature) → boolean`. Server Actions call it before a feature-gated operation;
+Server Components call it before rendering feature-gated UI. No caller reads the
+flag storage directly — all go through this one function, so the storage choice
+(33.2) stays encapsulated. The `feature` parameter is typed to the locked
+Phase-1 flag union (`epc_workflow | supply_only_workflow |
+service_report_acquiesce_window`), so an unknown flag name is a compile error,
+not a silent false.
+
+**33.2: Storage is JSONB `tenants.settings.enabled_features` — the arch-ref
+part-1 open fork is EXERCISED, not FORECLOSED.** Arch-ref part 1 left the storage
+mechanism "an open Phase 3 implementation detail, not yet decided," naming JSONB
+"the lighter starting point" and a dedicated `tenant_features` table "the natural
+upgrade if feature config turns out to need independent operational
+characteristics — its own audit trail of who toggled what and when," and wrote
+the whole section "to hold either way." D2 builds the JSONB shape — the named
+lighter start, and the same shape `provision-tenant.ts` already uses for every
+other tenant setting. This is NOT a design decision that overrode the arch-ref:
+the arch-ref explicitly authorizes the lighter start and encapsulates the choice
+behind the single reader (33.1). The `tenant_features` table upgrade remains
+fully available; it would change ONLY the internals of `isFeatureEnabled` and no
+caller, and its trigger condition (a need for an independent per-toggle audit
+trail) is recorded here so a future chat knows the fork was held open, not
+silently closed. Part 3's platform-admin toggle enforcement mechanism follows
+the storage choice: in the JSONB case, toggling is a service-role write in a
+Server Action gated by an app-layer platform-admin check, NOT an RLS UPDATE
+policy (there is no user-facing UPDATE on `tenants` to scope) — arch-ref
+450-455. That toggle surface is Phase 4 / roadmap, not built here.
+
+**33.3: Provisioning seeds all three flags enabled (opt-out model).**
+`enabled_features: { epc_workflow: true, supply_only_workflow: true,
+service_report_acquiesce_window: true }` is now written into the tenant settings
+blob at provisioning (arch-ref part 4). A platform admin disables one selectively
+for a pure-shape tenant. This SUPERSEDES the prior explicit deferral comment in
+`provision-tenant.ts` ("Feature flags ... are intentionally NOT seeded here ...
+D2 seeds its own flag defaults at provisioning") — that boundary was drawn by the
+provisioning author precisely so D2 would own the reader and its seeding as one
+unit, which it now does.
+
+**33.4: Fallback fails closed.** If `enabled_features` is absent or malformed, or
+a specific key is missing, `isFeatureEnabled` returns `false` (only an explicit
+`true` enables). A missing flag must never silently open a feature-gated path. A
+correctly provisioned tenant (33.3) never hits this fallback; it exists to fail
+safe if the settings blob is ever incomplete. Same "fallback is the safe
+direction" principle as C10's escalation reader (Decision 31.4), with the safe
+direction here being "off."
+
+### Design-fresh elements (flagged honestly)
+None. The storage fork (33.2) was resolved against the arch-ref's own explicit
+guidance (JSONB = the named lighter start; section written to hold either way;
+choice encapsulated behind the helper), not by inventing architecture. The
+provisioning boundary (33.3) was pre-drawn in `provision-tenant.ts` by its
+author. The flag set and the opt-out model are locked in arch-ref "Phase 1
+features" and part 4. D2 introduced zero new decisions — the build-era outcome.
+
+### Decision implications for already-committed sections
+- **Arch-ref "The feature flag system", part 1.** The open storage fork is now
+  EXERCISED as JSONB, not foreclosed. The `tenant_features` table upgrade remains
+  available behind the reader; trigger condition recorded in 33.2. No arch-ref
+  Status-line edit — the section already holds either way by design.
+- **`provision-tenant.ts` deferral note.** Superseded by 33.3; the note is
+  replaced (not frozen-in-place) because it was a code comment describing an
+  un-built state that is now built, not historical decision testimony.
+- **Feature-gated consumers (roadmap).** The three flags now have a live reader.
+  Downstream sections that gate on them (service-report acquiesce window,
+  arch-ref 5212-5218 / 5277; the EPC/supply-only trigger sources) can call
+  `isFeatureEnabled` when they are built. The clock-event creation gated by
+  `service_report_acquiesce_window` (Decision 21.5) is a B-layer concern.
+- **Platform-admin toggle surface (part 3).** Phase 4 / roadmap; the JSONB
+  enforcement path (service-role write + app-layer platform-admin check) is
+  recorded in 33.2 for whoever builds it.
+
+### Implementation status
+`lib/core/features/is-feature-enabled.ts` (new) and `lib/core/provision-tenant.ts`
+(seeding + note replacement). Typechecked (`tsc --noEmit` clean). Committed
+`0bf3713`, pushed Chat 28.
