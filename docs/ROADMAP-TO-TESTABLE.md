@@ -162,7 +162,14 @@ Each needs a scoping pass before build.
   path (021 flags inspection clock_events open). *Source: 021; arch-ref inspections section.*
 - [ ] **C3. Claim intake write-path** — the customer-facing tokenized intake
   form's Server Action (creates the claim from a tokenized submission).
-  *Depends on E1 (token infra). Source: 027; arch-ref Claim Intake.*
+  **CORE built + runtime-proven, Chat 31 (`5e2b90e`):** `lib/core/claims.ts`
+  `createClaimIntake` + migration 031 `create_claim_with_generated_id` (atomic
+  gap-free ClaimID, the ID Generation system's FIRST consumer — CLM-2026-0000001/2
+  verified, gap-free-on-rollback verified, monotonic increment verified).
+  **REMAINING: the token-authed action** (append to `lib/actions/claims.ts`;
+  confirm the create-vs-correction token seam against the unbuilt issuance
+  subsystem first — do not assume). Checkbox stays open until the action lands.
+  *Depends on E1 (token infra). Source: 027; arch-ref Claim Intake + ID Generation.*
 - [ ] **C4. Work Plan actions** (create/edit/status) — the warrantor INTENT
   entity, 5 CHECKs, conditional path fields. *Source: 020; Decisions 13/15/16.*
 - [ ] **C5. Customer Work Authorization actions** — generate document from Work

@@ -4,10 +4,10 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last updated:** 2026-07-29 (Chat 30), HEAD `24cef98`, from verified git history
+**Last updated:** 2026-07-29 (Chat 31), HEAD `5e2b90e`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
 construction is COMPLETE for every table-bearing section (twenty-nine tables +
-one view + three functions built). Chat 20 built the last two: 028
+one view + four functions built — the newest is the ClaimID generator `create_claim_with_generated_id` (migration 031), an app-layer generation function, not a table or calendar function). Chat 20 built the last two: 028
 (`service_reports`, one table) and 029 (`om_authorization_documents` +
 `om_authorization_templates`, two tables). The table count did not change at
 027: it added 25 columns to the `claims` shell rather than creating a table.
@@ -51,7 +51,7 @@ between them closed. The era is now building, not designing.
 | Phase 0 items | Items 16/17/18 locked (contacts, defaults, feature flags) | Done (design) |
 | Phase 3 | Decisions 11–35: all entity/workflow architecture | Done (design) |
 | Phase 4 | Hosted-DB migration baseline | **DONE (baselined)** |
-| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (29 tables + 1 view + 3 functions built — all table-bearing sections complete)** |
+| Phase 3 build | Implementing the ~20 designed sections as migrations/code | **IN PROGRESS (29 tables + 1 view + 4 functions built — all table-bearing sections complete; C3 claim-intake core + ClaimID generation (031) built and runtime-proven)** |
 
 **The design era:** commit `506b181` ("Phase 3 Tier 1 drafted in v2") began the
 design era; ~60 commits of architecture prose and doc-control followed. That era
@@ -67,7 +67,7 @@ migrations (005, 006).
 - Tenant provisioning + invitation system
 - Security hardening (search_path, fall-closed RLS helper)
 - Platform admin UI; tenant admin (dashboard, team list, seat counts)
-- **Migrations on disk: 31** — 000_baseline through 004_team_admin_management
+- **Migrations on disk: 32** — 000_baseline through 004_team_admin_management
   (auth/provisioning), plus **005_contacts**, **006_projects**,
   **007_import_batches**, **008_import_batch_fks**, **009_tenant_id_sequences**,
   **010_warranty_registrations**, **011_warranty_types**,
@@ -78,16 +78,18 @@ migrations (005, 006).
   **022_customer_work_authorization**, **023_acknowledgment_gate**,
   **024_tenant_holidays**, **025_ala_system**,
   **026_notices_of_defect**, **027_claim_intake**,
-  **028_service_report_submission**, **029_customer_om_authorization**, and **030_claim_lifecycle_status**
+  **028_service_report_submission**, **029_customer_om_authorization**, **030_claim_lifecycle_status**, and **031_claim_id_generation**
   (Phase 3 tables, the claim-lifecycle status enum (030, Decision 30), the FK
   constraints closing them,
-  the `warranty_coverages_effective` view, and the three business-day calendar
-  functions).
+  the `warranty_coverages_effective` view, the three business-day calendar
+  functions, and `create_claim_with_generated_id` (031) — the atomic gap-free
+  ClaimID generator, the ID Generation system's first consumer, built and
+  runtime-proven in Chat 31).
 
 Architecture sections marked **Implemented**: Standard RLS Pattern, Cache
 Invalidation Pattern, Schema Source-of-Truth (foundation), plus **Unified
 Contacts Directory**, **Project**, **Data Migration Tooling batch tracking**,
-**ID Generation** (tenant_id_sequences), **Warranty Registration**, and
+**ID Generation** (tenant_id_sequences; ClaimID generation logic now built as 031 — WarrantyID generation still unbuilt), **Warranty Registration**, and
 **Warranty Type Coverages** (built as 005–012).
 
 ### Phase 3 tables built (as of Chat 11)
