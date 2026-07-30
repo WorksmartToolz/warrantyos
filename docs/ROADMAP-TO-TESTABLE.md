@@ -166,10 +166,18 @@ Each needs a scoping pass before build.
   `createClaimIntake` + migration 031 `create_claim_with_generated_id` (atomic
   gap-free ClaimID, the ID Generation system's FIRST consumer — CLM-2026-0000001/2
   verified, gap-free-on-rollback verified, monotonic increment verified).
-  **REMAINING: the token-authed action** (append to `lib/actions/claims.ts`;
-  confirm the create-vs-correction token seam against the unbuilt issuance
-  subsystem first — do not assume). Checkbox stays open until the action lands.
-  *Depends on E1 (token infra). Source: 027; arch-ref Claim Intake + ID Generation.*
+  **REMAINING: the token-authed action** (append to `lib/actions/claims.ts`).
+  **NOT BLOCKED (corrected Chat 33.1).** The Chat-32 "blocked by undrafted Tier 3 /
+  issuance" finding was FALSE: `claims.intake_token` + `intake_token_expires_at`
+  exist and are built (027 L229-230, indexed L278-280), structurally identical to
+  `customer_token` (022/C5), `claimant_token` (025/C7), `recipient_token` (026/C6) —
+  none blocked. arch-ref L3466 ("tokenized intake is Tier 3") is a SHELL-scope
+  boundary note (016's "What is NOT in the shell"), meaning deferred-to-Tier-3, and
+  Tier 3 was built as 027. The token is minted at generate/send and validated at
+  customer submit — an ordinary build seam like C5/C6/C7, NOT an undrafted subsystem.
+  `warranty_registrations` has NO connection to intake tokenization (Chat 32 dug the
+  wrong table). Buildable now via E1b `validateToken`/`consumeToken` (already built).
+  *Source: 027; arch-ref Claim Intake + ID Generation; E1b `0aa08eb`.*
 - [x] **C4. Work Plan actions** (create/edit/status) — the warrantor INTENT
   entity, 5 CHECKs, conditional path fields.
   **CREATE built + runtime-proven, Chat 32 (`38bdfaa`):** `lib/core/work-plans.ts`

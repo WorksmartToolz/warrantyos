@@ -1,3 +1,16 @@
+# CHAT 33.1 HANDOFF — WarrantyOS Phase 3 (C4 COMPLETE + C3 false-blocker CORRECTED)
+
+> **REV 33.1 CORRECTION (2026-07-30):** The Chat-32 "C3 customer action is
+> BLOCKED by undrafted Tier 3 / issuance" conclusion was FALSE and is retracted.
+> `claims.intake_token` exists and is built (027 L229-230, indexed); arch-ref
+> L3466 is a shell-scope boundary note ("deferred to Tier 3"), not a foreclosure,
+> and Tier 3 was built as 027. Chat 32 also dug the wrong table
+> (`warranty_registrations`, which correctly carries no intake token — it has no
+> connection to intake tokenization at all). **C3's customer action is BUILDABLE**,
+> binding `claims.intake_token` exactly like C5/C6/C7. All C3 "blocked" lines below
+> are corrected inline. This was a manufactured blocker — the DIG-LAW failure mode
+> the docs warn about — caught by Andre's insistence, not the handoff.
+
 # CHAT 33 HANDOFF — WarrantyOS Phase 3 (C4 COMPLETE — edit + status machine built + runtime-proven)
 
 **Written at Chat 33 close, 2026-07-30.** (Filename is CHAT-33 because it is FOR
@@ -145,8 +158,17 @@ removed. Both commits pushed, origin = HEAD.
 
 ## NEXT UNIT — Andre decides; sequencing is his
 
-**C3 customer-facing action REMAINS BLOCKED** (Tier 3 / issuance undrafted — see
-the Chat-32 handoff dig chain; unchanged this session). Do not re-attempt.
+**C3 customer-facing action is NOT blocked — the Chat-32 blocker was FALSE
+(corrected Chat 33.1).** The dig: `claims.intake_token` + `intake_token_expires_at`
+EXIST (027 L229-230, indexed L278-280), structurally identical to `customer_token`
+(022/C5), `claimant_token` (025/C7), `recipient_token` (026/C6) — none of which
+is blocked. arch-ref L3466 ("tokenized intake is Tier 3") is a SHELL-scope
+boundary note under "What is NOT in the shell" (016), meaning "deferred to the
+Tier 3 section" — and Tier 3 IS drafted + built as 027. Chat 32 also dug the wrong
+table (`warranty_registrations`, which correctly has no token). C3 customer action
+binds `claims.intake_token` exactly like C5/C6/C7; the token is minted at
+generate/send and validated at customer submit — an ordinary build seam, not an
+undrafted subsystem. **C3 IS BUILDABLE.**
 
 Buildable-now, dependency-free candidates:
 
@@ -176,7 +198,7 @@ writing it. Deliberately NOT written this session (would be improvising B-layer)
 ## Buildable-now map
 
 - **C3 core** — built + runtime-proven (Chat 31). **C3 customer action —
-  BLOCKED (Tier 3 / issuance undrafted).**
+  BUILDABLE** (Chat-32 "blocked" was FALSE, corrected 33.1; binds `claims.intake_token`).
 - **C4** — COMPLETE (create Chat 32, edit/status Chat 33). Only UI remains.
 - **B-layer** — dedicated full-session arc (also builds WarrantyID generation
   AND C4/C10 system transitions).
@@ -191,7 +213,9 @@ writing it. Deliberately NOT written this session (would be improvising B-layer)
   29 tables + 1 view + 4 functions. C4 Create+Edit+Status in the BUILT list.
 - docs/ROADMAP-TO-TESTABLE.md — C4 `[x]` COMPLETE.
 - docs/architecture-reference.md — 7346 lines. Work Plan Workflow section + 020.
-  **L3466: tokenized intake is Tier 3 (undrafted) — the C3-action blocker.**
+  **L3466: "tokenized intake is Tier 3" is a SHELL-scope boundary note (016's
+  "What is NOT in the shell"), NOT a foreclosure — Tier 3 is built as 027, which
+  added claims.intake_token. NOT a C3 blocker (corrected 33.1).**
   L6550-6551: duration "derivable from the difference" — no ordering invariant.
 - docs/session-handoffs/5e-bridge-phase3-decisions-log-rev6.md — Decisions
   11–35. **Decision 15 L961** — Work Plan status machine; its "Open architectural
