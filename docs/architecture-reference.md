@@ -1042,6 +1042,8 @@ yet built, nor is the provisioning seed for new tenants. The hardcoded
 WID-YYYY-NNNNNN label in the settings page today is a placeholder, replaced by
 the real generated format when the settings UI becomes live.)
 
+**UPDATE (Chat 31, migration 031):** ClaimID generation logic is now built and runtime-proven. `create_claim_with_generated_id` (031) performs the locked lock -> increment -> format -> insert in ONE transaction, invoked by `lib/core/claims.ts` — the ID Generation system's first consumer. Gap-free-on-rollback and monotonic increment both verified directly against the DB (CLM-2026-0000001, -0000002; a rejected insert left the counter unadvanced). **Scope: ClaimID only.** WarrantyID generation remains unbuilt — its first consumer, the `warranty_id_early_issuance` clock event (Decision 27.2), is B-layer and unbuilt; see the Warranty Registration section's own Status. The provisioning seed for new tenants, described above as not-yet-built, in fact EXISTS: `provision-tenant.ts` seeds both the warranty_id and claim_id sequence rows at tenant creation. The "not yet built" and settings-UI-placeholder clauses above are frozen as prior testimony per Convention 7 — read them as the state 031 superseded.
+
 WarrantyOS generates two kinds of business-visible identifier: WarrantyIDs on
 every warranty registration and ClaimIDs on every claim. Both appear in
 customer-facing communications and in internal operational work, both are

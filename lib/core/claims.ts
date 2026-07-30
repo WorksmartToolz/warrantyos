@@ -251,49 +251,48 @@ export async function createClaimIntake(
     }
   }
 
-  // ── Insert. status defaults 'intake_received' (016); claim_id generated at
-  // insert. intake_token is NOT written here — it is the issuance subsystem's
-  // to mint and the action layer's to consume. ──
+  // ── Atomic create via the ID Generation system (migration 031). The RPC
+  // locks the (tenant, claim_id) sequence row, increments with UTC year-rollover,
+  // expands CLM-{year}-{seq:07d}, and INSERTs the claim in ONE transaction so a
+  // failed insert rolls the counter back — gap-free (Decision 2; arch-ref ID
+  // Generation). status defaults 'intake_received' (016); intake_token stays
+  // null (issuance subsystem's to mint). ──
   const { data: inserted, error } = await admin
-    .from('claims')
-    .insert({
-      tenant_id: tenantId,
-      warranty_registration_id: input.warranty_registration_id,
-      claim_type: input.claim_type,
-      date_of_defect_incident: input.date_of_defect_incident,
-      equipment_status: input.equipment_status,
-      loto_requirement: input.loto_requirement,
-      detailed_description: input.detailed_description as never,
-      submitter_name: input.submitter_name,
-      submitter_email: input.submitter_email,
-      submitter_contact_id: input.submitter_contact_id ?? null,
-      is_emergency: input.is_emergency ?? false,
-      emergency_details: (input.emergency_details ?? null) as never,
-      emergency_stabilized_at: input.emergency_stabilized_at ?? null,
-      offline_condition_explanation: (input.offline_condition_explanation ?? null) as never,
-      supporting_documents: (input.supporting_documents ?? null) as never,
-      required_docs_provided: input.required_docs_provided ?? false,
-      om_provider_company: input.om_provider_company ?? null,
-      om_contact_name: input.om_contact_name ?? null,
-      om_contact_phone: input.om_contact_phone ?? null,
-      om_contact_email: input.om_contact_email ?? null,
-      ship_to_street: input.ship_to_street ?? null,
-      ship_to_city: input.ship_to_city ?? null,
-      ship_to_state: input.ship_to_state ?? null,
-      ship_to_zip: input.ship_to_zip ?? null,
-      recipient_name: input.recipient_name ?? null,
-      recipient_phone: input.recipient_phone ?? null,
-      claim_type_data: (input.claim_type_data ?? null) as never,
+    .rpc('create_claim_with_generated_id', {
+      p_tenant_id: tenantId,
+      p_warranty_registration_id: input.warranty_registration_id,
+      p_claim_type: input.claim_type,
+      p_date_of_defect_incident: input.date_of_defect_incident,
+      p_equipment_status: input.equipment_status,
+      p_loto_requirement: input.loto_requirement,
+      p_detailed_description: input.detailed_description as never,
+      p_submitter_name: input.submitter_name,
+      p_submitter_email: input.submitter_email,
+      p_is_emergency: input.is_emergency ?? false,
+      p_emergency_details: (input.emergency_details ?? null) as never,
+      p_emergency_stabilized_at: input.emergency_stabilized_at ?? null,
+      p_offline_condition_explanation: (input.offline_condition_explanation ?? null) as never,
+      p_supporting_documents: (input.supporting_documents ?? null) as never,
+      p_required_docs_provided: input.required_docs_provided ?? false,
+      p_submitter_contact_id: input.submitter_contact_id ?? null,
+      p_om_provider_company: input.om_provider_company ?? null,
+      p_om_contact_name: input.om_contact_name ?? null,
+      p_om_contact_phone: input.om_contact_phone ?? null,
+      p_om_contact_email: input.om_contact_email ?? null,
+      p_ship_to_street: input.ship_to_street ?? null,
+      p_ship_to_city: input.ship_to_city ?? null,
+      p_ship_to_state: input.ship_to_state ?? null,
+      p_ship_to_zip: input.ship_to_zip ?? null,
+      p_recipient_name: input.recipient_name ?? null,
+      p_recipient_phone: input.recipient_phone ?? null,
+      p_claim_type_data: (input.claim_type_data ?? null) as never,
     } as never)
-    .select('id')
     .single()
-
   if (error || !inserted) {
     return {
       success: false,
       error: `Failed to create claim: ${error?.message ?? 'unknown error'}`,
     }
   }
-
-  return { success: true, id: inserted.id }
+  return { success: true, id: (inserted as { id: string }).id }
 }

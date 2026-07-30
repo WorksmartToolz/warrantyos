@@ -2180,6 +2180,41 @@ export type Database = {
       }
     }
     Functions: {
+      create_claim_with_generated_id: {
+        Args: {
+          p_claim_type: string
+          p_claim_type_data: Json
+          p_date_of_defect_incident: string
+          p_detailed_description: Json
+          p_emergency_details: Json
+          p_emergency_stabilized_at: string
+          p_equipment_status: string
+          p_is_emergency: boolean
+          p_loto_requirement: string
+          p_offline_condition_explanation: Json
+          p_om_contact_email: string
+          p_om_contact_name: string
+          p_om_contact_phone: string
+          p_om_provider_company: string
+          p_recipient_name: string
+          p_recipient_phone: string
+          p_required_docs_provided: boolean
+          p_ship_to_city: string
+          p_ship_to_state: string
+          p_ship_to_street: string
+          p_ship_to_zip: string
+          p_submitter_contact_id: string
+          p_submitter_email: string
+          p_submitter_name: string
+          p_supporting_documents: Json
+          p_tenant_id: string
+          p_warranty_registration_id: string
+        }
+        Returns: {
+          claim_id: string
+          id: string
+        }[]
+      }
       federal_holidays_for_year: {
         Args: { p_year: number }
         Returns: {
