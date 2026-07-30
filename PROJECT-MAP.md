@@ -4,7 +4,7 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last updated:** 2026-07-30 (Chat 32), HEAD `38bdfaa`, from verified git history
+**Last updated:** 2026-07-30 (Chat 33), HEAD `29fc21e`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
 construction is COMPLETE for every table-bearing section (twenty-nine tables +
 one view + four functions built — the newest is the ClaimID generator `create_claim_with_generated_id` (migration 031), an app-layer generation function, not a table or calendar function). Chat 20 built the last two: 028
@@ -776,7 +776,7 @@ built as 027, 028, and 029 respectively):
   exists to fire — `transitionInspectionStatusAsSystem` deliberately not written).
   Introduced zero new decisions; every element traced to 021 + the write-path +
   C10. Only its UI surface remains.
-- Work Plan Create (C4, Decisions 13/15/16) — BUILT (edit/status + UI pending):
+- Work Plan Create + Edit + Status (C4, Decisions 13/15/16) — BUILT (UI pending):
   the warrantor-INTENT create write-path (migration 020). `lib/core/work-plans.ts`
   `insertWorkPlan` + `lib/actions/work-plans.ts` `createWorkPlan` (`38bdfaa`,
   Chat 32). Mirrors the C0 inspection write-path exactly: `reviewer || team_admin`
@@ -789,8 +789,24 @@ built as 027, 028, and 029 respectively):
   FK+Snapshot captured from the validated contact row; `warranty_professional_user_id`
   a plain FK (020 defines no snapshot columns for it). `status` omitted on insert
   — DB defaults `draft`. Runtime-proven 10/10 against the local DB. Introduced
-  zero new decisions. REMAINING: the edit + five-state status machine (15.1) and
-  the UI surface.
+  zero new decisions.
+  **Edit + status machine — BUILT + runtime-proven (`29fc21e`, Chat 33):**
+  `transitionWorkPlanStatus` + `editWorkPlan` core, `changeWorkPlanStatus` +
+  `updateWorkPlan` actions. Five-value machine `draft → sent_for_authorization →
+  authorized → completed`, cancel from any non-terminal, `completed`/`cancelled`
+  terminal — mirrors C2 inspection-progression. ONE operational authz class
+  (`reviewer || team_admin`), resolving Decision 15's deferred per-transition
+  actor question with the house default (declines to differentiate rather than
+  answering it). Edit is content-fields-only — `execution_path` and its coupled
+  structural columns (`internal_team_id`, `subcontractor_contact_id`, the three
+  snapshots) are NOT editable — gated to the three pre-execution states
+  (`draft`/`sent_for_authorization`/`authorized`), locked in `completed`/`cancelled`
+  per Andre's execution-boundary rule (15.1 defines `completed` AS a service report
+  existing, so the boundary IS the status; no cross-table lookup). First-of-kind
+  patch semantics: key present → set, absent → unchanged, null-clear only on the
+  three nullable columns. No ordering check (arch-ref 6550: duration derivable, no
+  invariant locked). 24/24 runtime smoke. Introduced zero new decisions. Only the
+  UI surface remains.
 - Feature Flag Reader (D2, Decision 33) — BUILT (toggle UI pending): the
   single-source-of-truth helper `isFeatureEnabled(tenantId, feature) → boolean`
   (`lib/core/features/is-feature-enabled.ts`) plus its provisioning defaults

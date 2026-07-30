@@ -170,16 +170,23 @@ Each needs a scoping pass before build.
   confirm the create-vs-correction token seam against the unbuilt issuance
   subsystem first — do not assume). Checkbox stays open until the action lands.
   *Depends on E1 (token infra). Source: 027; arch-ref Claim Intake + ID Generation.*
-- [ ] **C4. Work Plan actions** (create/edit/status) — the warrantor INTENT
+- [x] **C4. Work Plan actions** (create/edit/status) — the warrantor INTENT
   entity, 5 CHECKs, conditional path fields.
   **CREATE built + runtime-proven, Chat 32 (`38bdfaa`):** `lib/core/work-plans.ts`
   `insertWorkPlan` + `lib/actions/work-plans.ts` `createWorkPlan`. Mirrors the C0
   inspections write-path (reviewer||team_admin authz, cross-tenant guard,
   service-role insert). Both conditional path couplings (13.1) reject-verified,
   Parts Claims exclusion (16.3) verified, subcontractor FK+Snapshot verified —
-  10/10 smoke cases. **REMAINING: edit + status machine** (Decision 15.1's
-  five-state `draft → sent_for_authorization → authorized → completed/cancelled`).
-  Checkbox stays open until edit/status lands. *Source: 020; Decisions 13/15/16.*
+  10/10 smoke cases.
+  **EDIT + STATUS built + runtime-proven, Chat 33 (`29fc21e`):** `transitionWorkPlanStatus`
+  + `editWorkPlan` core, `changeWorkPlanStatus` + `updateWorkPlan` actions. Five-state
+  machine `draft → sent_for_authorization → authorized → completed`, cancel from any
+  non-terminal, both terminal — mirrors C2 inspection-progression, one operational
+  authz class (reviewer||team_admin) resolving Decision 15's deferred actor question
+  with the house default. Edit is content-fields-only (execution_path + coupled
+  structural columns locked), gated to the three pre-execution states. First-of-kind
+  patch semantics (present=set, absent=untouched, null-clear on nullables only).
+  24/24 smoke cases. **C4 COMPLETE.** *Source: 020; Decisions 13/15/16.*
 - [ ] **C5. Customer Work Authorization actions** — generate document from Work
   Plan, tokenized customer approval (typed-name + acknowledgment signature),
   revise-and-resend; writes `work_authorization_response_overdue` clock row.
