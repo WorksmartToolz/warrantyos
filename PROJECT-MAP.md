@@ -4,7 +4,7 @@
 exists as working software, what exists only as locked design, and what the
 next real build steps are. Read this first in any new chat.
 
-**Last updated:** 2026-07-29 (Chat 31), HEAD `5e2b90e`, from verified git history
+**Last updated:** 2026-07-30 (Chat 32), HEAD `38bdfaa`, from verified git history
 and direct disk reads. Phase 4 baseline is complete and Phase 3 table
 construction is COMPLETE for every table-bearing section (twenty-nine tables +
 one view + four functions built — the newest is the ClaimID generator `create_claim_with_generated_id` (migration 031), an app-layer generation function, not a table or calendar function). Chat 20 built the last two: 028
@@ -776,6 +776,21 @@ built as 027, 028, and 029 respectively):
   exists to fire — `transitionInspectionStatusAsSystem` deliberately not written).
   Introduced zero new decisions; every element traced to 021 + the write-path +
   C10. Only its UI surface remains.
+- Work Plan Create (C4, Decisions 13/15/16) — BUILT (edit/status + UI pending):
+  the warrantor-INTENT create write-path (migration 020). `lib/core/work-plans.ts`
+  `insertWorkPlan` + `lib/actions/work-plans.ts` `createWorkPlan` (`38bdfaa`,
+  Chat 32). Mirrors the C0 inspection write-path exactly: `reviewer || team_admin`
+  operational authz, cross-tenant guard on the parent claim, service-role insert,
+  thin action delegating to core. Both Decision 13.1 conditional path couplings
+  (`internal_team_id` iff `warrantor_self_performs`; `subcontractor_contact_id`
+  iff a subcontractor path; both null on `customer_self_services`) validated
+  app-layer with the DB CHECKs as backstop. Parts Claims exclusion (16.3)
+  enforced app-layer against the parent claim's `claim_type`. Subcontractor
+  FK+Snapshot captured from the validated contact row; `warranty_professional_user_id`
+  a plain FK (020 defines no snapshot columns for it). `status` omitted on insert
+  — DB defaults `draft`. Runtime-proven 10/10 against the local DB. Introduced
+  zero new decisions. REMAINING: the edit + five-state status machine (15.1) and
+  the UI surface.
 - Feature Flag Reader (D2, Decision 33) — BUILT (toggle UI pending): the
   single-source-of-truth helper `isFeatureEnabled(tenantId, feature) → boolean`
   (`lib/core/features/is-feature-enabled.ts`) plus its provisioning defaults

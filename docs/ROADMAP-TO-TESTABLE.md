@@ -171,7 +171,15 @@ Each needs a scoping pass before build.
   subsystem first — do not assume). Checkbox stays open until the action lands.
   *Depends on E1 (token infra). Source: 027; arch-ref Claim Intake + ID Generation.*
 - [ ] **C4. Work Plan actions** (create/edit/status) — the warrantor INTENT
-  entity, 5 CHECKs, conditional path fields. *Source: 020; Decisions 13/15/16.*
+  entity, 5 CHECKs, conditional path fields.
+  **CREATE built + runtime-proven, Chat 32 (`38bdfaa`):** `lib/core/work-plans.ts`
+  `insertWorkPlan` + `lib/actions/work-plans.ts` `createWorkPlan`. Mirrors the C0
+  inspections write-path (reviewer||team_admin authz, cross-tenant guard,
+  service-role insert). Both conditional path couplings (13.1) reject-verified,
+  Parts Claims exclusion (16.3) verified, subcontractor FK+Snapshot verified —
+  10/10 smoke cases. **REMAINING: edit + status machine** (Decision 15.1's
+  five-state `draft → sent_for_authorization → authorized → completed/cancelled`).
+  Checkbox stays open until edit/status lands. *Source: 020; Decisions 13/15/16.*
 - [ ] **C5. Customer Work Authorization actions** — generate document from Work
   Plan, tokenized customer approval (typed-name + acknowledgment signature),
   revise-and-resend; writes `work_authorization_response_overdue` clock row.
