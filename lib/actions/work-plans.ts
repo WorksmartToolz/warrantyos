@@ -3,8 +3,14 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import {
   insertWorkPlan,
+  transitionWorkPlanStatus,
+  editWorkPlan,
   type CreateWorkPlanInput,
   type CreateWorkPlanResult,
+  type WorkPlanStatus,
+  type WorkPlanTransitionOutcome,
+  type EditWorkPlanInput,
+  type EditWorkPlanResult,
 } from '@/lib/core/work-plans'
 
 // C4 action layer. Thin by convention (mirrors lib/actions/inspections.ts):
@@ -35,5 +41,35 @@ export async function createWorkPlan(
 
   const result = await insertWorkPlan(input, callerId)
   if (result.success) revalidateWorkPlanPages(input.claim_id)
+  return result
+}
+
+// ── C4 status machine + edit (action wrappers) ───────────────────────────────
+// Same thin convention as createWorkPlan: resolve caller, delegate to core,
+// revalidate on success. Action verbs differ from core verbs per the
+// insert/create precedent:
+//   core transitionWorkPlanStatus → action changeWorkPlanStatus
+//   core editWorkPlan             → action updateWorkPlan
+// Both core functions return claimId, so both reuse revalidateWorkPlanPages.
+
+export async function changeWorkPlanStatus(
+  workPlanId: string,
+  to: WorkPlanStatus
+): Promise<WorkPlanTransitionOutcome> {
+  const callerId = await getCallerId()
+  if (!callerId) return { success: false, error: 'Not authenticated' }
+  const result = await transitionWorkPlanStatus(workPlanId, to, callerId)
+  if (result.success) revalidateWorkPlanPages(result.claimId)
+  return result
+}
+
+export async function updateWorkPlan(
+  workPlanId: string,
+  patch: EditWorkPlanInput
+): Promise<EditWorkPlanResult> {
+  const callerId = await getCallerId()
+  if (!callerId) return { success: false, error: 'Not authenticated' }
+  const result = await editWorkPlan(workPlanId, patch, callerId)
+  if (result.success) revalidateWorkPlanPages(result.claimId)
   return result
 }

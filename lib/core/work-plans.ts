@@ -331,3 +331,232 @@ export async function insertWorkPlan(
 
   return { success: true, id: (inserted as { id: string }).id }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// C4 — Work Plan edit + status machine (domain layer)
+//
+// Appends to the C4 write-path. Reuses this file's fetchCallerProfile,
+// richTextMaxChars, and richTextLength — same operational-write authz, same
+// rich-text cap idiom. No new helper, no new decision.
+//
+// Source of truth (all dug to the floor this session against locked sources):
+//   * migration 020_work_plans.sql — the five-value status CHECK
+//     (draft | sent_for_authorization | authorized | completed | cancelled),
+//     the NOT NULL contract on the content columns, the nullable set.
+//   * Decision 15.1 — the five states and their meaning. cancelled is the
+//     abandon terminal.
+//   * Decision 15 "Open architectural questions deferred" — per-transition
+//     ACTOR differentiation and completed→non-terminal backward edges are
+//     explicitly deferred as operational. Andre's Chat-33 call resolves the
+//     open actor question with the HOUSE DEFAULT (no differentiation): every
+//     transition uses the one 'operational' class (reviewer || team_admin),
+//     identical to C2 and the C4 write-path. completed and cancelled stay
+//     terminal (no backward edge).
+//   * Edit rule (Andre, Chat 33): editable while no work has been executed —
+//     before the claim reaches the Service Report stage. Because 15.1 defines
+//     'completed' AS "a Service Report has been submitted", the execution
+//     boundary IS the completed status. Pure status gate; NO cross-table lookup.
+//   * Edit scope (Andre, Chat 33): CONTENT fields only. execution_path and its
+//     coupled structural columns are NOT editable.
+//   * Ordering: arch-ref 6550-6551 — duration is "derivable from the
+//     difference"; no ordering invariant is locked. Edit stays symmetric with
+//     create (no planned_end > planned_start check; Standing Order #2).
+//   * Patch semantics: no locked convention, no prior edit function. First-of-
+//     kind, built as the honest application of 020's NOT NULL contract:
+//     key PRESENT → set; key ABSENT → unchanged; null-to-clear only on the
+//     three columns 020 declares nullable.
+// ═════════════════════════════════════════════════════════════════════════════
+
+export type WorkPlanStatus =
+  | 'draft'
+  | 'sent_for_authorization'
+  | 'authorized'
+  | 'completed'
+  | 'cancelled'
+
+const WORK_PLAN_TRANSITIONS: Partial<Record<WorkPlanStatus, WorkPlanStatus[]>> = {
+  draft: ['sent_for_authorization', 'cancelled'],
+  sent_for_authorization: ['authorized', 'cancelled'],
+  authorized: ['completed', 'cancelled'],
+}
+
+export type WorkPlanTransitionSuccess = {
+  success: true
+  from: WorkPlanStatus
+  to: WorkPlanStatus
+  claimId: string
+}
+export type WorkPlanTransitionOutcome =
+  | WorkPlanTransitionSuccess
+  | { success: false; error: string }
+
+export async function transitionWorkPlanStatus(
+  workPlanId: string,
+  to: WorkPlanStatus,
+  requestedBy: string
+): Promise<WorkPlanTransitionOutcome> {
+  const caller = await fetchCallerProfile(requestedBy)
+  if (!caller) return { success: false, error: 'Unauthorized' }
+
+  const admin = createAdminClient()
+
+  const { data: plan } = await admin
+    .from('work_plans')
+    .select('status, tenant_id, claim_id')
+    .eq('id', workPlanId)
+    .single()
+
+  if (!plan) return { success: false, error: 'Work plan not found' }
+  if (plan.tenant_id !== caller.tenantId) {
+    return { success: false, error: 'Cross-tenant operation not allowed' }
+  }
+
+  const from = plan.status as WorkPlanStatus
+  const legal = WORK_PLAN_TRANSITIONS[from] ?? []
+  if (!legal.includes(to)) {
+    return { success: false, error: `Illegal transition: ${from} → ${to}` }
+  }
+
+  const { error } = await admin
+    .from('work_plans')
+    .update({ status: to })
+    .eq('id', workPlanId)
+    .eq('status', from)
+
+  if (error) {
+    return { success: false, error: `Failed to update work plan status: ${error.message}` }
+  }
+
+  return { success: true, from, to, claimId: plan.claim_id }
+}
+
+export interface EditWorkPlanInput {
+  work_plan_type?: string
+  planned_start_at?: string
+  planned_end_at?: string
+  crew_size?: number
+  corrective_actions?: RichText
+  repair_scope_approach?: RichText
+  required_materials_equipment?: RichText | null
+  safety_considerations?: RichText | null
+  site_access_coordination?: RichText | null
+}
+
+export type EditWorkPlanResult =
+  | { success: true; id: string; claimId: string }
+  | { success: false; error: string }
+
+const EDITABLE_STATUSES: readonly WorkPlanStatus[] = [
+  'draft',
+  'sent_for_authorization',
+  'authorized',
+]
+
+export async function editWorkPlan(
+  workPlanId: string,
+  patch: EditWorkPlanInput,
+  requestedBy: string
+): Promise<EditWorkPlanResult> {
+  const caller = await fetchCallerProfile(requestedBy)
+  if (!caller) return { success: false, error: 'Unauthorized' }
+
+  const admin = createAdminClient()
+
+  const { data: plan } = await admin
+    .from('work_plans')
+    .select('status, tenant_id, claim_id')
+    .eq('id', workPlanId)
+    .single()
+
+  if (!plan) return { success: false, error: 'Work plan not found' }
+  if (plan.tenant_id !== caller.tenantId) {
+    return { success: false, error: 'Cross-tenant operation not allowed' }
+  }
+
+  const currentStatus = plan.status as WorkPlanStatus
+  if (!EDITABLE_STATUSES.includes(currentStatus)) {
+    return { success: false, error: `A ${currentStatus} work plan cannot be edited` }
+  }
+
+  const update: Record<string, unknown> = {}
+
+  if ('work_plan_type' in patch) {
+    if (!WORK_PLAN_TYPES.includes(patch.work_plan_type as WorkPlanType)) {
+      return { success: false, error: 'Invalid work_plan_type' }
+    }
+    update.work_plan_type = patch.work_plan_type
+  }
+  if ('planned_start_at' in patch) {
+    if (!patch.planned_start_at) {
+      return { success: false, error: 'planned_start_at cannot be cleared' }
+    }
+    update.planned_start_at = patch.planned_start_at
+  }
+  if ('planned_end_at' in patch) {
+    if (!patch.planned_end_at) {
+      return { success: false, error: 'planned_end_at cannot be cleared' }
+    }
+    update.planned_end_at = patch.planned_end_at
+  }
+  if ('crew_size' in patch) {
+    if (patch.crew_size === null || patch.crew_size === undefined) {
+      return { success: false, error: 'crew_size cannot be cleared' }
+    }
+    update.crew_size = patch.crew_size
+  }
+  if ('corrective_actions' in patch) {
+    if (patch.corrective_actions === null || patch.corrective_actions === undefined) {
+      return { success: false, error: 'corrective_actions cannot be cleared' }
+    }
+    update.corrective_actions = patch.corrective_actions
+  }
+  if ('repair_scope_approach' in patch) {
+    if (patch.repair_scope_approach === null || patch.repair_scope_approach === undefined) {
+      return { success: false, error: 'repair_scope_approach cannot be cleared' }
+    }
+    update.repair_scope_approach = patch.repair_scope_approach
+  }
+
+  if ('required_materials_equipment' in patch) {
+    update.required_materials_equipment = patch.required_materials_equipment ?? null
+  }
+  if ('safety_considerations' in patch) {
+    update.safety_considerations = patch.safety_considerations ?? null
+  }
+  if ('site_access_coordination' in patch) {
+    update.site_access_coordination = patch.site_access_coordination ?? null
+  }
+
+  if (Object.keys(update).length === 0) {
+    return { success: false, error: 'No editable fields provided' }
+  }
+
+  const cap = await richTextMaxChars(caller.tenantId)
+  const richTextKeys = [
+    'corrective_actions',
+    'repair_scope_approach',
+    'required_materials_equipment',
+    'safety_considerations',
+    'site_access_coordination',
+  ] as const
+  for (const key of richTextKeys) {
+    if (key in update) {
+      const value = update[key] as RichText
+      if (value !== null && richTextLength(value) > cap) {
+        return { success: false, error: `${key} exceeds ${cap} characters` }
+      }
+    }
+  }
+
+  const { error } = await admin
+    .from('work_plans')
+    .update(update as never)
+    .eq('id', workPlanId)
+    .in('status', EDITABLE_STATUSES as unknown as string[])
+
+  if (error) {
+    return { success: false, error: `Failed to edit work plan: ${error.message}` }
+  }
+
+  return { success: true, id: workPlanId, claimId: plan.claim_id }
+}
